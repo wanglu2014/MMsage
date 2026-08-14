@@ -1,0 +1,31 @@
+# MMSage platform dependencies
+# Derived by static import analysis of backend/ and tests/ in this snapshot.
+# backend/requirements.txt is a one-line `-r ../requirements.txt` pointing here.
+# Requires Python 3.10 or newer.
+
+# --- Web service (backend/api_server.py) ---
+fastapi>=0.104
+uvicorn>=0.24
+pydantic>=2.0
+python-multipart>=0.0.6      # required by api_server.py: `file: UploadFile = File(...)`
+
+# --- Graph / numeric core ---
+networkx>=3.0                # knowledge-graph build, traversal, .gml I/O
+numpy>=1.23
+pandas>=1.5
+
+# --- Literature retrieval ---
+biopython>=1.81              # Bio.Entrez, used by agents/pubmed_query.py and build_kg.py
+requests>=2.28
+
+# --- LLM relation extraction (build_kg.py, llm_reasoning.py, protocol_refiner.py) ---
+openai>=1.0
+
+# --- SapBERT entity normalisation (backend/db_checkers/) ---
+sentence-transformers>=2.2   # pulls torch + transformers
+# The prebuilt index (sapbert_index/entity_embeddings.npy, 777 MB) is NOT shipped.
+# Rebuild it with: python backend/db_checkers/build_sapbert_index.py
+
+# --- Tests ---
+pytest>=7.0
+httpx>=0.24                  # required by fastapi.testclient.TestClient

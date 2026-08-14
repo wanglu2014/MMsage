@@ -1,0 +1,1616 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MMSage-Insight | MMSage Signal × Evidence Foundation</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+    <script src="https://unpkg.com/cytoscape@3.26.0/dist/cytoscape.min.js"></script>
+    <script src="https://unpkg.com/dagre@0.8.5/dist/dagre.min.js"></script>
+    <script src="https://unpkg.com/cytoscape-dagre@2.5.0/cytoscape-dagre.js"></script>
+    <script src="https://unpkg.com/cytoscape-svg@0.4.0/cytoscape-svg.js"></script>
+    <script src="/static/kg_evidence.js"></script>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <style>
+      body { font-family: Inter, system-ui, -apple-system, sans-serif; }
+      .print-only { display: none; }
+      .screen-only { display: block; }
+
+      @media print {
+        @page {
+          size: A4 portrait;
+          margin: 12mm;
+        }
+
+        @page landscape {
+          size: A4 landscape;
+          margin: 12mm;
+        }
+
+        body {
+          background: #fff !important;
+          -webkit-print-color-adjust: exact;
+          print-color-adjust: exact;
+        }
+
+        /* Force stacked layout to avoid grid/canvas offset in print */
+        .grid,
+        .grid-cols-12,
+        .col-span-12,
+        .lg\:col-span-8,
+        .lg\:col-span-4 {
+          display: block !important;
+          width: 100% !important;
+          max-width: 100% !important;
+        }
+
+        .gap-6,
+        .space-y-2,
+        .space-y-4 {
+          gap: 0 !important;
+        }
+
+        /* Keep each card together on one page when possible */
+        .rounded-xl {
+          break-inside: avoid;
+          page-break-inside: avoid;
+        }
+
+        /* Force each Step module onto its own page (avoid splitting). */
+        #step1-card {
+          page: landscape;
+          break-after: page;
+          page-break-after: always;
+          break-inside: avoid !important;
+          page-break-inside: avoid !important;
+        }
+        #uncharted-dark-matter {
+          break-before: page;
+          page-break-before: always;
+          break-after: page;
+          page-break-after: always;
+        }
+        #uncharted-dark-matter .uncharted-grid {
+          display: grid !important;
+          grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+          gap: 0.5rem !important;
+          max-height: none !important;
+          overflow: visible !important;
+        }
+        #step2-card {
+          page: landscape;
+          break-after: page;
+          page-break-after: always;
+          break-inside: avoid !important;
+          page-break-inside: avoid !important;
+        }
+        #step3-card {
+          break-before: page;
+          page-break-before: always;
+          break-inside: avoid !important;
+          page-break-inside: avoid !important;
+        }
+        #step3-card pre {
+          break-inside: avoid !important;
+          page-break-inside: avoid !important;
+        }
+
+        #step3-card pre {
+          border: 0 !important;
+          background: #fff !important;
+          padding: 0 !important;
+        }
+
+        /* Stabilize chart/canvas print dimensions */
+        #main-plot,
+        #kg {
+          width: 100% !important;
+          min-height: 0 !important;
+          height: 0 !important;
+          overflow: hidden !important;
+        }
+
+        .screen-only {
+          display: none !important;
+        }
+
+        .print-only {
+          display: block !important;
+        }
+
+        .print-figure {
+          width: 100% !important;
+          max-width: 100% !important;
+          height: auto !important;
+          border: 1px solid #e5e7eb;
+          border-radius: 0.5rem;
+          background: #fff;
+        }
+
+        .print-figure--a4-portrait-third {
+          aspect-ratio: 210 / 99;
+          width: 210mm !important;
+          max-width: 210mm !important;
+          max-height: 99mm !important;
+          object-fit: contain;
+        }
+
+        .print-figure--a4-landscape {
+          aspect-ratio: 297 / 210;
+          max-height: 186mm !important;
+          object-fit: contain;
+        }
+
+        /* Plotly SVG — vector in PDF */
+        .print-figure--vector {
+          display: block;
+        }
+
+        #main-plot .plot-container,
+        #main-plot .svg-container,
+        #main-plot .main-svg {
+          width: 100% !important;
+          max-width: 100% !important;
+        }
+
+        #kg canvas {
+          width: 100% !important;
+          height: 100% !important;
+        }
+
+        /* Hide interactive controls and heavy scrolling in print */
+        button,
+        input[type="file"] {
+          display: none !important;
+        }
+
+        .overflow-y-auto,
+        .max-h-\[280px\],
+        .max-h-\[420px\],
+        .max-h-\[480px\],
+        .max-h-\[600px\] {
+          max-height: none !important;
+          overflow: visible !important;
+        }
+
+        footer {
+          page-break-before: avoid;
+        }
+      }
+    </style>
+  </head>
+  <body class="bg-white text-gray-800">
+    <div id="root"></div>
+
+    <script src="/static/dashboard.compiled.js?v=20260625-1">
+      const { useEffect, useState, useMemo, useCallback, useRef } = React;
+      const API_BASE = window.location.origin;
+
+      const MM_TO_PX_150 = 150 / 25.4;
+
+      /** Step 1: full A4 portrait width, height = 1/3 page (210 × 99 mm) */
+      const A4_PORTRAIT_THIRD = {
+        widthMm: 210,
+        heightMm: 297 / 3,
+        widthPx: Math.round(210 * MM_TO_PX_150),
+        heightPx: Math.round((297 / 3) * MM_TO_PX_150),
+      };
+
+      /** A4 landscape — 297 × 210 mm @ ~150 dpi (Step 2 KG export/print) */
+      const A4_LANDSCAPE = {
+        widthMm: 297,
+        heightMm: 210,
+        widthPx: 1754,
+        heightPx: 1240,
+      };
+
+      /** Publication figure settings */
+      const FIGURE = {
+        plot: { format: "svg", width: A4_PORTRAIT_THIRD.widthPx, height: A4_PORTRAIT_THIRD.heightPx },
+        plotPng: { format: "png", width: A4_PORTRAIT_THIRD.widthPx, height: A4_PORTRAIT_THIRD.heightPx, scale: 3 },
+        kgSvg: { full: true, scale: 2, bg: "#ffffff" },
+        kgPngScale: 4,
+      };
+
+      function normalizeSvgSize(svg, widthMm, heightMm) {
+        if (!svg || typeof svg !== "string") return svg;
+        return svg.replace(/<svg([^>]*)>/i, (match, attrs) => {
+          const cleaned = attrs
+            .replace(/\s*width\s*=\s*["'][^"']*["']/gi, "")
+            .replace(/\s*height\s*=\s*["'][^"']*["']/gi, "")
+            .replace(/\s*preserveAspectRatio\s*=\s*["'][^"']*["']/gi, "");
+          return `<svg${cleaned} width="${widthMm}mm" height="${heightMm}mm" preserveAspectRatio="xMidYMid meet">`;
+        });
+      }
+
+      function normalizeSvgA4PortraitThird(svg) {
+        return normalizeSvgSize(svg, A4_PORTRAIT_THIRD.widthMm, A4_PORTRAIT_THIRD.heightMm);
+      }
+
+      function normalizeSvgA4Landscape(svg) {
+        return normalizeSvgSize(svg, A4_LANDSCAPE.widthMm, A4_LANDSCAPE.heightMm);
+      }
+
+      function plotlyToPrintImage(plotEl) {
+        if (!plotEl || !window.Plotly?.toImage) return Promise.resolve(null);
+        return window.Plotly.toImage(plotEl, FIGURE.plot)
+          .then((dataUri) => {
+            const svg = dataUriToSvg(dataUri);
+            return svg ? svgToDataUri(normalizeSvgA4PortraitThird(svg)) : dataUri;
+          })
+          .catch(() => null);
+      }
+
+      function cytoscapeSvgString(cy) {
+        if (!cy || typeof cy.svg !== "function") return null;
+        try {
+          cy.resize();
+          cy.fit(undefined, 30);
+          return normalizeSvgA4Landscape(cy.svg(FIGURE.kgSvg));
+        } catch (e) {
+          console.warn("KG SVG export failed", e);
+          return null;
+        }
+      }
+
+      function svgToDataUri(svg) {
+        return "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
+      }
+
+      function dataUriToSvg(dataUri) {
+        if (!dataUri || !dataUri.startsWith("data:")) return null;
+        const comma = dataUri.indexOf(",");
+        if (comma < 0) return null;
+        const meta = dataUri.slice(0, comma);
+        const payload = dataUri.slice(comma + 1);
+        if (meta.includes(";base64")) {
+          try {
+            return atob(payload);
+          } catch (e) {
+            return null;
+          }
+        }
+        return payload.startsWith("<") ? payload : decodeURIComponent(payload);
+      }
+
+      function downloadPlotSvg(plotEl) {
+        if (!plotEl || !window.Plotly?.toImage) return;
+        plotlyToPrintImage(plotEl)
+          .then((dataUri) => {
+            const svg = dataUriToSvg(dataUri);
+            if (!svg) return;
+            const blob = new Blob([svg], { type: "image/svg+xml;charset=utf-8" });
+            const a = document.createElement("a");
+            a.href = URL.createObjectURL(blob);
+            a.download = "quadrant_plot.svg";
+            a.click();
+            URL.revokeObjectURL(a.href);
+          })
+          .catch(() => null);
+      }
+
+      function cytoscapeToPrintSvgUri(cy) {
+        const svg = cytoscapeSvgString(cy);
+        if (svg) return svgToDataUri(svg);
+        try {
+          return cy.png({
+            output: "base64uri",
+            bg: "#ffffff",
+            scale: FIGURE.kgPngScale,
+            full: true,
+          });
+        } catch (e) {
+          return null;
+        }
+      }
+
+      function downloadKgSvg(cy) {
+        const svg = cytoscapeSvgString(cy);
+        if (!svg) return;
+        const blob = new Blob([svg], { type: "image/svg+xml;charset=utf-8" });
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = "kg_chain_view.svg";
+        a.click();
+        URL.revokeObjectURL(a.href);
+      }
+
+      const QUADRANT_ORDER = ["I", "II", "III", "IV"];
+      const QUADRANT_PRIORITY = { I: 0, II: 1, III: 2, IV: 3 };
+      const QUADRANT_HEADERS = {
+        I: "I · Dark Matter ★",
+        II: "II · Novel, Weak Signal",
+        III: "III · Known Relationship",
+        IV: "IV · Low Priority",
+      };
+
+      function sortCandidatesGrouped(candidates) {
+        return [...candidates].sort((a, b) => {
+          const pa = QUADRANT_PRIORITY[a.quadrant] ?? 9;
+          const pb = QUADRANT_PRIORITY[b.quadrant] ?? 9;
+          if (pa !== pb) return pa - pb;
+          return (b.mmsage_norm ?? 0) - (a.mmsage_norm ?? 0);
+        });
+      }
+
+      function buildCandidateGroups(candidates) {
+        const sorted = sortCandidatesGrouped(candidates);
+        const groups = [];
+        for (const quadrant of QUADRANT_ORDER) {
+          const items = sorted.filter((c) => c.quadrant === quadrant);
+          if (!items.length) continue;
+          groups.push({ quadrant, items });
+        }
+        const other = sorted.filter((c) => !QUADRANT_ORDER.includes(c.quadrant));
+        if (other.length) {
+          groups.push({ quadrant: "?", items: other });
+        }
+        return groups;
+      }
+
+      function formatLabel(value) {
+        const acronyms = new Set(["ibd", "ibs", "crc", "uc", "cd", "nafld", "t2d"]);
+        return String(value || "")
+          .replace(/_/g, " ")
+          .split(/\s+/)
+          .filter(Boolean)
+          .map((word) => {
+            const lower = word.toLowerCase();
+            if (acronyms.has(lower)) return lower.toUpperCase();
+            return word.charAt(0).toUpperCase() + word.slice(1);
+          })
+          .join(" ");
+      }
+
+      function supportLevelClass(level) {
+        switch ((level || "").toLowerCase()) {
+          case "direct":
+            return "bg-emerald-100 text-emerald-800";
+          case "indirect":
+            return "bg-amber-100 text-amber-800";
+          default:
+            return "bg-gray-100 text-gray-700";
+        }
+      }
+
+      function App() {
+        const initialRunId = new URLSearchParams(window.location.search).get("run_id") || "";
+        const [candidates, setCandidates] = useState([]);
+        const [thresholds, setThresholds] = useState({ mmsage: 0.5, evidence: 0 });
+        const [selectedPair, setSelectedPair] = useState(null);
+        const [analysisResult, setAnalysisResult] = useState(null);
+        const [protocol, setProtocol] = useState("");
+        const [protocolError, setProtocolError] = useState("");
+        const [validationPlan, setValidationPlan] = useState(null);
+        const [validationPlanError, setValidationPlanError] = useState("");
+        const [validationPlanLoading, setValidationPlanLoading] = useState(false);
+        const [validationPlanJobId, setValidationPlanJobId] = useState("");
+        const [validationPlanStatus, setValidationPlanStatus] = useState(null);
+        const [validationResearchQuestion, setValidationResearchQuestion] = useState("");
+        const [validationPromptConstraints, setValidationPromptConstraints] = useState("");
+        const [loading, setLoading] = useState(false);
+        const [uploading, setUploading] = useState(false);
+        const [uploadMsg, setUploadMsg] = useState("");
+        const [disease, setDisease] = useState("IBD");
+        const [maxQueries, setMaxQueries] = useState(15);
+        const [maxArticlesPerQuery, setMaxArticlesPerQuery] = useState(20);
+        const [currentRunId, setCurrentRunId] = useState(initialRunId);
+        const [defaultRunId, setDefaultRunId] = useState("");
+        const [currentJobId, setCurrentJobId] = useState("");
+        const [plotPrintImg, setPlotPrintImg] = useState("");
+        const [kgPrintImg, setKgPrintImg] = useState("");
+        const [unchartedExpanded, setUnchartedExpanded] = useState(false);
+        const fileRef = useRef(null);
+        const UNCHARTED_PREVIEW = 3;
+        const candidateGroups = useMemo(
+          () => buildCandidateGroups(candidates),
+          [candidates]
+        );
+        const unchartedDarkMatter = useMemo(
+          () => candidates
+            .filter((c) => ((c.pair_bm_exp ?? 0) + (c.pair_md_exp ?? 0)) === 0)
+            .sort((a, b) => (b.mmsage_norm ?? 0) - (a.mmsage_norm ?? 0)),
+          [candidates]
+        );
+
+        const buildMechanismSummary = useCallback((pair) => {
+          if (!pair) return "";
+          return `Composite: ${(pair.composite_score ?? 0).toFixed(2)}, MMSage: ${(pair.mmsage_norm ?? 0).toFixed(3)}, bm_exp: ${pair.pair_bm_exp ?? 0}, md_exp: ${pair.pair_md_exp ?? 0}, Novelty: ${(pair.novelty_score ?? 0).toFixed(3)}`;
+        }, []);
+
+        const updateDashboardUrl = useCallback((runId) => {
+          const url = new URL(window.location.href);
+          if (runId) {
+            url.searchParams.set("run_id", runId);
+          } else {
+            url.searchParams.delete("run_id");
+          }
+          window.history.replaceState({}, "", `${url.pathname}${url.search}`);
+        }, []);
+
+        const formatValidationStage = useCallback((stage) => {
+            const labels = {
+              queued: "Queued",
+              started: "Worker Started",
+              prepare_support: "Load Candidate Support",
+              round1_search: "Round 1 Literature Search",
+              audit_protocol: "Protocol Audit",
+              followup_queries: "Generate Follow-up Queries",
+              round2_search: "Follow-up Literature Search",
+              fulltext_methods: "Extract Full-Text Methods",
+              protocols_io_search: "Search protocols.io",
+              evidence_adjudication: "Adjudicate Direct Evidence & Hypotheses",
+              in_vitro_design: "Design In Vitro Package",
+              in_vivo_design: "Design In Vivo Package",
+              self_reflection: "Self-Reflection & Revision",
+            assemble: "Assemble Final Plan",
+            completed: "Completed",
+            error: "Error",
+          };
+          return labels[stage] || formatLabel(stage || "running");
+        }, []);
+
+        const loadCandidates = useCallback(async (targetRunId = "") => {
+          const params = new URLSearchParams();
+          if (targetRunId) params.set("run_id", targetRunId);
+          const qs = params.toString();
+          const res = await fetch(`${API_BASE}/api/dual-axis-candidates${qs ? `?${qs}` : ""}`);
+          const data = await res.json();
+          setCandidates(data?.candidates || []);
+          if (data?.thresholds) setThresholds(data.thresholds);
+          setSelectedPair(null);
+          setAnalysisResult(null);
+          const nextRunId = data?.run_id || targetRunId || "";
+          setCurrentRunId((prevRunId) => {
+            if (prevRunId !== nextRunId) {
+              setProtocol("");
+              setProtocolError("");
+              setValidationPlan(null);
+              setValidationPlanError("");
+              setValidationPlanLoading(false);
+              setValidationPlanJobId("");
+              setValidationPlanStatus(null);
+            }
+            return nextRunId;
+          });
+          setDefaultRunId(data?.default_dashboard_run_id || "");
+          setDisease(data?.disease || "IBD");
+        }, []);
+
+        // Load candidates
+        useEffect(() => {
+          loadCandidates(initialRunId).catch(console.error);
+        }, [initialRunId, loadCandidates]);
+
+        // Render quadrant plot
+        useEffect(() => {
+          if (candidates.length > 0) {
+            setTimeout(() => renderQuadrantPlot(candidates, thresholds), 100);
+          }
+        }, [candidates, thresholds]);
+
+        useEffect(() => {
+          setUnchartedExpanded(false);
+        }, [candidates]);
+
+        useEffect(() => {
+          setProtocol("");
+          setProtocolError("");
+          setValidationPlan(null);
+          setValidationPlanError("");
+          setValidationPlanLoading(false);
+          setValidationPlanJobId("");
+          setValidationPlanStatus(null);
+        }, [selectedPair?.bacteria, selectedPair?.metabolite, disease]);
+
+        useEffect(() => {
+          if (!validationPlanJobId || !validationPlanLoading) return undefined;
+          let cancelled = false;
+
+          const pollStatus = async () => {
+            try {
+              const res = await fetch(`${API_BASE}/api/validation-plan/status/${encodeURIComponent(validationPlanJobId)}`);
+              const data = await res.json().catch(() => ({}));
+              if (cancelled) return;
+              if (!res.ok) {
+                throw new Error(parseApiError(data, `Validation plan status failed (${res.status})`));
+              }
+              setValidationPlanStatus(data);
+              if (data.status === "completed") {
+                setValidationPlan(data.result || null);
+                setValidationPlanLoading(false);
+                return;
+              }
+              if (data.status === "error") {
+                setValidationPlanError(data.error || data.current_message || "Validation plan generation failed.");
+                setValidationPlanLoading(false);
+                return;
+              }
+              window.setTimeout(pollStatus, 1800);
+            } catch (err) {
+              if (cancelled) return;
+              setValidationPlanError(err.message || "Validation plan status polling failed.");
+              setValidationPlanLoading(false);
+            }
+          };
+
+          pollStatus();
+          return () => {
+            cancelled = true;
+          };
+        }, [validationPlanJobId, validationPlanLoading]);
+
+        // Reflow charts before printing to avoid canvas/SVG offset.
+        useEffect(() => {
+          const handleBeforePrint = () => {
+            const plotEl = document.getElementById("main-plot");
+            if (plotEl && window.Plotly) {
+              plotlyToPrintImage(plotEl).then((url) => {
+                if (url) setPlotPrintImg(url);
+              });
+            }
+            if (window._kgCy) {
+              window._kgCy.resize();
+              window._kgCy.fit(undefined, 30);
+              const dataUri = cytoscapeToPrintSvgUri(window._kgCy);
+              if (dataUri) setKgPrintImg(dataUri);
+            }
+          };
+
+          window.addEventListener("beforeprint", handleBeforePrint);
+          // Some browsers fire print layout after beforeprint; run once more shortly after.
+          const mediaQuery = window.matchMedia("print");
+          const onMqChange = (e) => {
+            if (e.matches) {
+              setTimeout(handleBeforePrint, 80);
+            }
+          };
+          if (mediaQuery.addEventListener) {
+            mediaQuery.addEventListener("change", onMqChange);
+          } else if (mediaQuery.addListener) {
+            mediaQuery.addListener(onMqChange);
+          }
+
+          return () => {
+            window.removeEventListener("beforeprint", handleBeforePrint);
+            if (mediaQuery.removeEventListener) {
+              mediaQuery.removeEventListener("change", onMqChange);
+            } else if (mediaQuery.removeListener) {
+              mediaQuery.removeListener(onMqChange);
+            }
+          };
+        }, []);
+
+        const renderQuadrantPlot = useCallback((data, thresh) => {
+          const el = document.getElementById("main-plot");
+          if (!el) return;
+
+          // Only show points with evidence > 0 (bm+md=0 → see Uncharted Dark Matter panel below)
+          const withEvidence = data.filter(d => ((d.pair_bm_exp ?? 0) + (d.pair_md_exp ?? 0)) > 0);
+
+          // Three groups:
+          // 1. Known (novelty < 1.0) → cross marker
+          // 2. Top 5% novel by composite_score → star marker + auto-label metabolite name
+          // 3. Other novel → circle marker
+          const known = withEvidence.filter(d => (d.novelty_score ?? 1) < 1.0);
+          const allNovel = withEvidence.filter(d => (d.novelty_score ?? 1) >= 1.0);
+          const topN = 10;
+          const novelSorted = [...allNovel].sort((a, b) => (b.composite_score ?? 0) - (a.composite_score ?? 0));
+          const topNovel = novelSorted.slice(0, topN);
+          const topSet = new Set(topNovel.map(d => d.bacteria + "|" + d.metabolite));
+          const otherNovel = allNovel.filter(d => !topSet.has(d.bacteria + "|" + d.metabolite));
+
+          const makeTip = (d) => {
+            const bact = d.bacteria.replace(/_/g, " ");
+            let tip = `<b>${d.metabolite}</b><br>${bact}`;
+            tip += `<br>MMSage: ${d.mmsage_norm.toFixed(3)}`;
+            tip += `<br>bm_exp: ${d.pair_bm_exp ?? 0}  |  md_exp: ${d.pair_md_exp ?? 0}`;
+            tip += `<br>Composite: ${(d.composite_score ?? 0).toFixed(2)}`;
+            tip += `<br>Novelty: ${(d.novelty_score ?? 0).toFixed(3)} ${(d.novelty_score ?? 1) >= 1.0 ? "★ novel" : ""}`;
+            return tip;
+          };
+
+          // Point size based on composite_score (continuous, good spread)
+          // novelty is almost always 1.0 so useless for sizing
+          const compScores = withEvidence.map(d => d.composite_score ?? 0);
+          const compMax = Math.max(...compScores, 1);
+          const compSize = (d, minS, maxS) => {
+            const ratio = (d.composite_score ?? 0) / compMax;
+            return minS + ratio * (maxS - minS);
+          };
+
+          const traces = [
+            // Known → cross (×)
+            {
+              x: known.map(d => d.mmsage_norm),
+              y: known.map(d => (d.pair_bm_exp ?? 0) + (d.pair_md_exp ?? 0)),
+              mode: "markers", type: "scatter",
+              name: "× Known",
+              marker: {
+                color: "#94a3b8",
+                size: known.map(d => compSize(d, 7, 16)),
+                opacity: 0.6,
+                symbol: "x",
+                line: { width: 2, color: "#94a3b8" },
+              },
+              text: known.map(makeTip),
+              hovertemplate: "%{text}<extra></extra>",
+              _items: known,
+            },
+            // Other novel → circle (●)
+            {
+              x: otherNovel.map(d => d.mmsage_norm),
+              y: otherNovel.map(d => (d.pair_bm_exp ?? 0) + (d.pair_md_exp ?? 0)),
+              mode: "markers", type: "scatter",
+              name: "● Novel",
+              marker: {
+                color: "#6366f1",
+                size: otherNovel.map(d => compSize(d, 7, 18)),
+                opacity: 0.7,
+                symbol: "circle",
+                line: { width: 1, color: "#ffffff" },
+              },
+              text: otherNovel.map(makeTip),
+              hovertemplate: "%{text}<extra></extra>",
+              _items: otherNovel,
+            },
+            // Top 5% novel → star (★) with text labels
+            {
+              x: topNovel.map(d => d.mmsage_norm),
+              y: topNovel.map(d => (d.pair_bm_exp ?? 0) + (d.pair_md_exp ?? 0)),
+              mode: "markers+text", type: "scatter",
+              name: "★ Top 10 Novel",
+              marker: {
+                color: "#f59e0b",
+                size: topNovel.map(d => compSize(d, 16, 24)),
+                opacity: 1,
+                symbol: "star",
+                line: { width: 1.5, color: "#ffffff" },
+              },
+              text: topNovel.map(d => `<b>${d.metabolite.replace(/_/g, " ")}</b>`),
+              textposition: "top center",
+              textfont: { size: 17, color: "#78350f", family: "Inter, system-ui, sans-serif" },
+              cliponaxis: false,
+              hovertext: topNovel.map(makeTip),
+              hovertemplate: "%{hovertext}<extra></extra>",
+              _items: topNovel,
+            },
+          ];
+
+          // Size legend: dummy traces to show composite_score → size mapping
+          const sizeLegendValues = [0.2, 0.5, 1.0];
+          const sizeLegendLabels = ["Composite Low", "Composite Mid", "Composite High"];
+          sizeLegendValues.forEach((ratio, i) => {
+            const sz = 7 + ratio * 11;
+            traces.push({
+              x: [null], y: [null],
+              mode: "markers", type: "scatter",
+              name: sizeLegendLabels[i],
+              marker: { color: "#d1d5db", size: sz, symbol: "circle", line: { width: 1, color: "#9ca3af" } },
+              showlegend: true,
+              hoverinfo: "skip",
+              legendgroup: "size",
+            });
+          });
+
+          const allEF = data.map(d => (d.pair_bm_exp ?? 0) + (d.pair_md_exp ?? 0));
+
+          // Use log(1+y) transform for Y axis to spread out the skewed distribution
+          // Most candidates have evidence=0, a few have 100+, log scale makes all 4 quadrants visible
+          const logY = (v) => Math.log2(1 + v);
+          const yRaw = allEF;
+          const yTransformed = yRaw.map(logY);
+          const yMaxT = Math.max(...yTransformed, 1) * 1.1;
+          const tx = thresh.mmsage;
+          // Transform the threshold too; if threshold=0, use a small visual offset so bottom quadrants are visible
+          const tyRaw = Math.max(thresh.evidence, 1);  // at least 1 paper as threshold if median=0
+          const ty = logY(tyRaw);
+
+          // Transform the trace Y values
+          traces.forEach(tr => {
+            tr.y = tr.y.map(v => logY(v));
+          });
+
+          const layout = {
+            paper_bgcolor: "#ffffff",
+            plot_bgcolor: "#ffffff",
+            font: { color: "#374151", family: "Inter, system-ui, sans-serif", size: 15 },
+            margin: { t: 62, l: 92, r: 38, b: 88 },
+            xaxis: {
+              title: { text: "MMSage Signal", font: { size: 19, color: "#4b5563" } },
+              range: [-0.05, 1.05],
+              showgrid: false,
+              zeroline: false,
+              linecolor: "#e5e7eb",
+              linewidth: 1,
+              tickfont: { size: 15, color: "#374151" },
+              ticks: "outside",
+              ticklen: 6,
+            },
+            yaxis: {
+              title: { text: "Evidence Foundation  log₂(1 + bm + md)", font: { size: 19, color: "#4b5563" } },
+              range: [-0.5, yMaxT],
+              showgrid: true,
+              gridcolor: "#f3f4f6",
+              zeroline: false,
+              linecolor: "#e5e7eb",
+              linewidth: 1,
+              tickfont: { size: 15, color: "#374151" },
+              ticks: "outside",
+              ticklen: 6,
+            },
+            title: {
+              text: "MMSage Signal × Evidence Foundation  (★ = novel, no triple evidence)",
+              font: { size: 21, color: "#1f2937" },
+            },
+            legend: { x: 0.01, y: 0.99, bgcolor: "rgba(255,255,255,0.95)", bordercolor: "#e5e7eb", borderwidth: 1, font: { size: 14 } },
+            shapes: [],
+            annotations: [],
+          };
+
+          Plotly.newPlot("main-plot", traces, layout, { responsive: true });
+
+          plotlyToPrintImage(el).then((url) => {
+            if (url) setPlotPrintImg(url);
+          });
+
+          el.on("plotly_click", (event) => {
+            const pt = event.points[0];
+            const trace = traces[pt.curveNumber];
+            if (trace && trace._items) {
+              setSelectedPair(trace._items[pt.pointIndex]);
+            }
+          });
+        }, []);
+
+        // Upload coordinates CSV
+        const handleUpload = async () => {
+          const file = fileRef.current?.files?.[0];
+          if (!file) return;
+          if (!disease.trim()) { setUploadMsg("Please enter a disease name."); return; }
+          if (!Number.isInteger(maxQueries) || maxQueries < 1 || !Number.isInteger(maxArticlesPerQuery) || maxArticlesPerQuery < 1) {
+            setUploadMsg("PubMed limits must be positive integers.");
+            return;
+          }
+          setUploading(true);
+          setUploadMsg("Uploading...");
+          const formData = new FormData();
+          formData.append("file", file);
+          try {
+            const params = new URLSearchParams({
+              disease: disease.trim(),
+              max_queries: String(maxQueries),
+              max_articles_per_query: String(maxArticlesPerQuery),
+            });
+            const res = await fetch(`${API_BASE}/api/upload-coordinates?${params.toString()}`, {
+              method: "POST", body: formData,
+            });
+            const data = await res.json();
+            if (data.error) {
+              setUploadMsg("Error: " + data.error);
+              setUploading(false);
+              return;
+            }
+            const jobId = data.job_id || "";
+            setCurrentJobId(jobId);
+            // Pipeline started in background — poll for progress
+            setUploadMsg(`Pipeline started for ${disease}... (step1: MMSage signal)`);
+            const poll = setInterval(async () => {
+              try {
+                const pr = await fetch(`${API_BASE}/api/jobs/${encodeURIComponent(jobId)}/status`);
+                const pg = await pr.json();
+                if (pg.status === "done") {
+                  clearInterval(poll);
+                  setUploadMsg(`Done! ${pg.candidates || 0} candidates for ${pg.disease}. Loading your isolated run...`);
+                  setUploading(false);
+                  if (pg.run_id) {
+                    updateDashboardUrl(pg.run_id);
+                    await loadCandidates(pg.run_id);
+                  }
+                } else if (pg.status === "error") {
+                  clearInterval(poll);
+                  setUploadMsg("Pipeline error: " + (pg.error || "unknown"));
+                  setUploading(false);
+                } else {
+                  setUploadMsg(`Pipeline running... ${pg.step || ""} (${pg.disease})`);
+                }
+              } catch (e) { /* ignore poll errors */ }
+            }, 3000);
+          } catch (err) {
+            setUploadMsg("Upload failed: " + err.message);
+            setUploading(false);
+          }
+        };
+
+        const parseApiError = (data, fallback) => {
+          const d = data?.detail;
+          if (Array.isArray(d)) return d.map((x) => x.msg || x).join("; ");
+          if (typeof d === "string") return d;
+          return fallback;
+        };
+
+        // Analyze selected pair
+        const handleAnalyze = async () => {
+          if (!selectedPair) return;
+          setLoading(true);
+          setProtocol("");
+          setProtocolError("");
+          setValidationPlan(null);
+          setValidationPlanError("");
+          setValidationPlanLoading(false);
+          setValidationPlanJobId("");
+          setValidationPlanStatus(null);
+          if (window.KgEvidence) window.KgEvidence.clearPanel();
+          const { bacteria, metabolite } = selectedPair;
+
+          const kgParams = new URLSearchParams({ bacteria, metabolite, disease });
+          if (currentRunId) kgParams.set("run_id", currentRunId);
+
+          try {
+            const kgRes = await fetch(`${API_BASE}/api/graph/chain?${kgParams.toString()}`);
+            const kg = await kgRes.json().catch(() => ({}));
+            if (!kgRes.ok) {
+              throw new Error(parseApiError(kg, `Knowledge graph request failed (${kgRes.status})`));
+            }
+            renderKG(kg);
+            setAnalysisResult({
+              ...selectedPair,
+              prioritization: `${bacteria.replace(/_/g, " ")} → ${metabolite} → ${disease} | Composite: ${(selectedPair.composite_score ?? 0).toFixed(2)}`
+            });
+          } catch (err) {
+            console.error("KG render failed:", err);
+            setProtocolError((prev) =>
+              prev ? `${prev} Knowledge graph: ${err.message}` : `Knowledge graph: ${err.message}`
+            );
+          }
+
+          try {
+            const protoRes = await fetch(`${API_BASE}/api/generate-protocol`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                bacteria, metabolite, disease,
+                run_id: currentRunId,
+                mechanism_summary: buildMechanismSummary(selectedPair),
+              })
+            });
+            const protoData = await protoRes.json().catch(() => ({}));
+            if (!protoRes.ok) {
+              throw new Error(parseApiError(protoData, `Protocol generation failed (${protoRes.status})`));
+            }
+            const text = (protoData && protoData.protocol) ? String(protoData.protocol).trim() : "";
+            if (!text) {
+              throw new Error("Server returned an empty protocol. Check OPENAI_API_KEY and LLM settings.");
+            }
+            setProtocol(text);
+          } catch (err) {
+            console.error("Protocol generation failed:", err);
+            setProtocol("");
+            setProtocolError((prev) =>
+              prev ? `${prev} Protocol: ${err.message || "Protocol generation failed."}` : (err.message || "Protocol generation failed.")
+            );
+          }
+
+          setLoading(false);
+        };
+
+        const handleGenerateValidationPlan = async () => {
+          if (!selectedPair || !protocol.trim()) return;
+          setValidationPlanLoading(true);
+          setValidationPlan(null);
+          setValidationPlanError("");
+          setValidationPlanStatus(null);
+          setValidationPlanJobId("");
+          const { bacteria, metabolite } = selectedPair;
+
+          try {
+            const planRes = await fetch(`${API_BASE}/api/validation-plan/start`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                bacteria, metabolite, disease,
+                run_id: currentRunId,
+                mechanism_summary: buildMechanismSummary(selectedPair),
+                protocol_text: protocol,
+                research_question: validationResearchQuestion.trim(),
+                prompt_constraints: validationPromptConstraints.trim(),
+              })
+            });
+            const planData = await planRes.json().catch(() => ({}));
+            if (!planRes.ok) {
+              throw new Error(parseApiError(planData, `Validation plan generation failed (${planRes.status})`));
+            }
+            if (!planData || typeof planData !== "object" || !planData.job_id) {
+              throw new Error("Server returned an invalid validation-plan job payload.");
+            }
+            setValidationPlanJobId(planData.job_id);
+            setValidationPlanStatus({
+              job_id: planData.job_id,
+              status: planData.status || "started",
+              progress_percent: 0,
+              current_stage: "queued",
+              current_message: planData.message || "Validation plan job started.",
+              logs: [],
+            });
+          } catch (err) {
+            console.error("Validation plan generation failed:", err);
+            setValidationPlan(null);
+            setValidationPlanError(err.message || "Validation plan generation failed.");
+            setValidationPlanStatus(null);
+            setValidationPlanJobId("");
+            setValidationPlanLoading(false);
+          }
+        };
+
+        const renderKG = (kg) => {
+          const container = document.getElementById("kg");
+          if (!container) return;
+          if (window._kgCy) window._kgCy.destroy();
+
+          const KG_COLORS = {
+            microbe: "#3b82f6", metabolite: "#f59e0b", pathway: "#10b981",
+            disease: "#ef4444", enzyme: "#f97316", receptor: "#06b6d4", unknown: "#9ca3af"
+          };
+          const KG_SHAPES = {
+            microbe: "ellipse", metabolite: "round-rectangle", pathway: "diamond",
+            disease: "hexagon", enzyme: "triangle", receptor: "vee"
+          };
+
+          const nodes = (kg.nodes || []).map((node) => ({
+            ...node,
+            data: {
+              ...node.data,
+              label: formatLabel(node?.data?.label || node?.data?.id || "")
+            }
+          }));
+          const edges = kg.edges || [];
+
+          window._kgCy = cytoscape({
+            container,
+            elements: [...nodes, ...edges],
+            // Enable mouse-wheel zooming and panning.
+            userZoomingEnabled: true,
+            userPanningEnabled: true,
+            style: [
+              // Base nodes use larger, high-contrast labels.
+              { selector: "node", style: {
+                "label": "data(label)",
+                "background-color": function(ele) { return KG_COLORS[ele.data("type")] || "#cbd5e1"; },
+                "shape": function(ele) { return KG_SHAPES[ele.data("type")] || "ellipse"; },
+                "color": "#111827", 
+                "font-size": 18, // Improve readability in scientific figures.
+                "font-weight": "700",
+                "text-wrap": "wrap", 
+                "text-max-width": 180,
+                "text-valign": "bottom", 
+                "text-halign": "center", 
+                "text-margin-y": 10,
+                "text-background-color": "#ffffff",
+                "text-background-opacity": 0.96,
+                "text-background-padding": 5,
+                "text-background-shape": "roundrectangle",
+                "text-outline-color": "#ffffff",
+                "text-outline-width": 2,
+                "width": 66, // Enlarge base nodes.
+                "height": 66, 
+                "border-width": 2, 
+                "border-color": "#ffffff",
+              }},
+              // Emphasize the three core target nodes.
+              { selector: "node[?is_core]", style: {
+                "width": 116, // Enlarge core nodes.
+                "height": 116, 
+                "font-size": 24, // Increase core label size.
+                "font-weight": "900",
+                "text-max-width": 220,
+                "border-width": 5, 
+                "border-color": "#1e3a8a",
+                "text-background-opacity": 1,
+              }},
+              // Base edges use thicker strokes and white text outlines.
+              { selector: "edge", style: {
+                "width": 3, 
+                "line-color": "#cbd5e1", 
+                "target-arrow-color": "#cbd5e1",
+                "curve-style": "bezier", 
+                "target-arrow-shape": "triangle",
+                "label": "data(relation)", 
+                "font-size": 14, 
+                "color": "#475569",
+                "text-rotation": "autorotate",
+                "text-outline-color": "#ffffff",
+                "text-outline-width": 4,
+              }},
+              // Highlight the core inference chain with a thick dark-blue stroke.
+              { selector: "edge[?is_chain]", style: {
+                "width": 7, 
+                "line-color": "#2563eb", 
+                "target-arrow-color": "#2563eb",
+                "font-size": 17, 
+                "font-weight": "bold", 
+                "color": "#1e40af",
+                "text-outline-width": 4,
+                "z-index": 10 
+              }},
+              { selector: "node:selected", style: {
+                "border-width": 5,
+                "border-color": "#eab308",
+              }},
+            ],
+            // Tighten layout spacing so the graph fills the viewport.
+            layout: { 
+              name: "dagre", 
+              rankDir: "LR", 
+              nodeSep: 30,   // Reduce vertical spacing.
+              rankSep: 90,   // Reduce rank spacing.
+              padding: 15    // Remove excess outer padding.
+            }
+          });
+
+          const captureKgImage = () => {
+            const dataUri = cytoscapeToPrintSvgUri(window._kgCy);
+            if (dataUri) setKgPrintImg(dataUri);
+          };
+          window._kgCy.one("layoutstop", () => setTimeout(captureKgImage, 60));
+          setTimeout(captureKgImage, 250);
+
+          window._kgEvidenceContext = () => ({
+            bacteria: selectedPair?.bacteria || "",
+            metabolite: selectedPair?.metabolite || "",
+            disease: disease || "IBD",
+            run_id: currentRunId || "",
+            api_base: API_BASE,
+          });
+          if (window.KgEvidence) {
+            window.KgEvidence.bind(window._kgCy, () => window._kgEvidenceContext());
+          }
+        };
+
+        return (
+          <div className="min-h-screen p-6">
+            <header className="mb-6 flex items-center justify-between flex-wrap gap-4">
+              <div>
+                <h1 className="text-3xl font-bold text-gray-900">MMSage-Insight</h1>
+                <p className="text-gray-500">MMSage Signal × Evidence Foundation | ★ = Novel (no triple evidence)</p>
+              </div>
+              <a
+                href="/browse"
+                className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-sm font-medium transition shadow-sm"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 7v10c0 2 1 3 3 3h10c2 0 3-1 3-3V7c0-2-1-3-3-3H7C5 4 4 5 4 7zm16 0H4m16 4H4m5 4h6" />
+                </svg>
+                Results Catalog
+              </a>
+              {currentRunId && defaultRunId && currentRunId !== defaultRunId && (
+                <button
+                  onClick={() => {
+                    updateDashboardUrl("");
+                    loadCandidates("").catch(console.error);
+                  }}
+                  className="inline-flex items-center gap-2 px-4 py-2 bg-white hover:bg-gray-50 text-gray-700 border border-gray-300 rounded-lg text-sm font-medium transition shadow-sm"
+                >
+                  View Home Result
+                </button>
+              )}
+            </header>
+
+            {/* Upload Section */}
+            <div className="mb-6 p-4 bg-gray-50 border border-gray-200 rounded-xl flex items-center gap-4 flex-wrap">
+              <div>
+                <span className="text-sm font-medium text-gray-700">Disease:</span>
+                <input value={disease} onChange={e => setDisease(e.target.value)}
+                  className="ml-2 border border-gray-300 rounded-lg px-3 py-1.5 text-sm w-32" placeholder="e.g. IBD" />
+              </div>
+              <div>
+                <span className="text-sm font-medium text-gray-700">Max PubMed queries:</span>
+                <input type="number" min="1" step="1" value={maxQueries}
+                  onChange={e => setMaxQueries(Number(e.target.value))}
+                  className="ml-2 border border-gray-300 rounded-lg px-3 py-1.5 text-sm w-20" />
+              </div>
+              <div>
+                <span className="text-sm font-medium text-gray-700">Articles per query:</span>
+                <input type="number" min="1" step="1" value={maxArticlesPerQuery}
+                  onChange={e => setMaxArticlesPerQuery(Number(e.target.value))}
+                  className="ml-2 border border-gray-300 rounded-lg px-3 py-1.5 text-sm w-20" />
+              </div>
+              <div className="border-l border-gray-300 pl-4">
+                <span className="text-sm font-medium text-gray-700">Upload Coordinates CSV:</span>
+              </div>
+              <input ref={fileRef} type="file" accept=".csv"
+                className="text-sm text-gray-600 file:mr-2 file:py-1.5 file:px-4 file:rounded-lg file:border file:border-gray-300 file:bg-white file:text-gray-700 file:cursor-pointer hover:file:bg-gray-50" />
+              <button onClick={handleUpload} disabled={uploading}
+                className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-400 text-white rounded-lg text-sm font-medium transition">
+                {uploading ? "Uploading..." : "Upload & Process"}
+              </button>
+              {uploadMsg && <span className="text-sm text-amber-600">{uploadMsg}</span>}
+              {currentRunId && (
+                <span className="text-xs text-gray-500">
+                  Viewing run: {currentRunId === defaultRunId ? "home default" : currentRunId}
+                </span>
+              )}
+              {currentJobId && uploading && (
+                <span className="text-xs text-gray-400 font-mono">Job: {currentJobId}</span>
+              )}
+            </div>
+
+            {/* Core layout: two rows with aligned columns. */}
+            <div className="flex flex-col gap-6">
+              
+              {/* First row: Step 1 on the left and candidates on the right. */}
+              <div className="grid grid-cols-12 gap-6 items-start">
+                <div id="step1-card" className="col-span-12 lg:col-span-8 bg-white rounded-xl p-4 border border-gray-200 shadow-sm flex flex-col">
+                  <h2 className="text-2xl mb-2 flex items-center gap-2 text-gray-900 font-semibold">
+                    Step 1: Signal Discovery
+                    <span className="text-base text-gray-500 font-normal">Click a point to select</span>
+                    <div className="ml-auto flex gap-2 font-normal">
+                      <button onClick={() => {
+                        const plotEl = document.getElementById("main-plot");
+                        if (plotEl) downloadPlotSvg(plotEl);
+                      }} className="text-xs px-3 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition"
+                        title="Vector SVG - 210 x 99 mm (A4 page width x one-third page height)">
+                        Export SVG
+                      </button>
+                      <button onClick={() => {
+                        Plotly.downloadImage("main-plot", { ...FIGURE.plotPng, filename: "quadrant_plot" });
+                      }} className="text-xs px-3 py-1 bg-amber-500 hover:bg-amber-600 text-white rounded-lg transition"
+                        title="High-resolution raster preview">
+                        Export PNG
+                      </button>
+                    </div>
+                  </h2>
+                  <div id="main-plot" className="h-[480px] min-h-[480px] shrink-0 screen-only"></div>
+                  {plotPrintImg && (
+                    <div className="print-only">
+                      <img src={plotPrintImg} alt="Step 1 Signal Discovery Plot" className="print-figure print-figure--vector print-figure--a4-portrait-third" />
+                    </div>
+                  )}
+                </div>
+
+                {/* Candidate List */}
+                <div className="col-span-12 lg:col-span-4 bg-white rounded-xl p-4 border border-gray-200 shadow-sm flex flex-col">
+                  <h3 className="text-lg mb-2 text-gray-900">Candidates ({candidates.length} total)</h3>
+                  <div className="space-y-2 max-h-[480px] overflow-y-auto pr-1 flex-1">
+                    {(() => {
+                      let rank = 0;
+                      return candidateGroups.map((group) => (
+                        <div key={group.quadrant} className="space-y-2">
+                          <div className="sticky top-0 z-10 bg-white/95 backdrop-blur px-1 py-1 text-xs font-semibold text-gray-600 border-b border-gray-100">
+                            {QUADRANT_HEADERS[group.quadrant] || `Quadrant ${group.quadrant}`}
+                            <span className="ml-1 font-normal text-gray-400">({group.items.length})</span>
+                          </div>
+                          {group.items.map((c) => {
+                            rank += 1;
+                            const isSelected =
+                              selectedPair?.bacteria === c.bacteria &&
+                              selectedPair?.metabolite === c.metabolite;
+                            return (
+                              <div
+                                key={`${c.bacteria}-${c.metabolite}`}
+                                onClick={() => setSelectedPair(c)}
+                                className={`p-2 rounded-lg border cursor-pointer transition ${
+                                  isSelected
+                                    ? "border-indigo-400 bg-indigo-50"
+                                    : "border-gray-200 hover:border-gray-400 hover:bg-gray-50"
+                                }`}
+                              >
+                                <div className="flex items-center justify-between">
+                                  <div className="text-sm font-medium text-gray-800 truncate">
+                                    {c.metabolite}
+                                  </div>
+                                  <span className="text-xs text-gray-400">#{rank}</span>
+                                </div>
+                                <div className="text-xs text-gray-500 flex gap-3 mt-1 flex-wrap">
+                                  <span>MMSage: {c.mmsage_norm.toFixed(3)}</span>
+                                  <span>bm: {c.pair_bm_exp ?? 0}</span>
+                                  <span>md: {c.pair_md_exp ?? 0}</span>
+                                  <span
+                                    className={`font-medium ${
+                                      (c.novelty_score ?? 1) >= 1.0
+                                        ? "text-amber-500"
+                                        : "text-emerald-600"
+                                    }`}
+                                  >
+                                    {(c.novelty_score ?? 1) >= 1.0 ? "★ novel" : "known"}
+                                  </span>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ));
+                    })()}
+                  </div>
+                  <button className="mt-4 w-full bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-400 text-white py-2 rounded-lg font-medium shadow-sm transition mt-auto"
+                    onClick={handleAnalyze} disabled={!selectedPair || loading}>
+                    {loading ? "Analyzing..." : "Analyze Mechanism"}
+                  </button>
+                </div>
+              </div>
+
+              {/* Show three uncharted dark-matter candidates by default. */}
+              <div id="uncharted-dark-matter" className="col-span-12 bg-gray-50/80 rounded-lg px-3 py-2.5 border border-gray-100">
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                  <h3 className="text-xs font-medium text-gray-500">
+                    Uncharted Dark Matter
+                    <span className="ml-1 text-gray-400">({unchartedDarkMatter.length})</span>
+                  </h3>
+                  <span className="text-[11px] text-gray-400">
+                    bm = 0, md = 0 · excluded from Step 1 plot
+                  </span>
+                  <details className="text-[11px] text-gray-400 ml-auto">
+                    <summary className="cursor-pointer hover:text-gray-600 select-none list-none [&::-webkit-details-marker]:hidden">
+                      Why separate?
+                    </summary>
+                    <p className="mt-1.5 text-gray-500 max-w-2xl leading-relaxed">
+                      No PubMed evidence for microbe–metabolite (bm) or metabolite–disease (md) links;
+                      zero-literature pairs are omitted from the scatter plot but remain high-priority MMSage signals.
+                    </p>
+                  </details>
+                </div>
+                {unchartedDarkMatter.length === 0 ? (
+                  <p className="text-xs text-gray-400 mt-2">No uncharted candidates in this run.</p>
+                ) : (
+                  <>
+                    <div className="uncharted-grid grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-1.5 mt-2">
+                      {(unchartedExpanded
+                        ? unchartedDarkMatter
+                        : unchartedDarkMatter.slice(0, UNCHARTED_PREVIEW)
+                      ).map((c, i) => {
+                        const isSelected =
+                          selectedPair?.bacteria === c.bacteria &&
+                          selectedPair?.metabolite === c.metabolite;
+                        return (
+                          <div
+                            key={`${c.bacteria}-${c.metabolite}`}
+                            onClick={() => setSelectedPair(c)}
+                            className={`px-2 py-1.5 rounded border cursor-pointer transition text-xs ${
+                              isSelected
+                                ? "border-gray-400 bg-white"
+                                : "border-gray-200 bg-white/60 hover:border-gray-300 hover:bg-white"
+                            }`}
+                          >
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="font-medium text-gray-700 truncate">{c.metabolite}</div>
+                              <span className="text-gray-400 shrink-0">#{i + 1}</span>
+                            </div>
+                            <div className="text-gray-400 flex gap-2 mt-0.5">
+                              <span>MMSage {c.mmsage_norm.toFixed(3)}</span>
+                              <span>uncharted</span>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    {unchartedDarkMatter.length > UNCHARTED_PREVIEW && (
+                      <button
+                        type="button"
+                        onClick={() => setUnchartedExpanded((v) => !v)}
+                        className="mt-2 text-[11px] text-gray-400 hover:text-gray-600 transition"
+                      >
+                        {unchartedExpanded
+                          ? "Show less"
+                          : `Show all ${unchartedDarkMatter.length} uncharted pairs`}
+                      </button>
+                    )}
+                  </>
+                )}
+              </div>
+
+              {/* Second row: Step 2 on the left and analysis on the right. */}
+              {/* CSS Grid keeps panels in the same row at equal height. */}
+              <div className="grid grid-cols-12 gap-6">
+                
+                {/* Step 2: Knowledge Graph */}
+                <div id="step2-card" className="col-span-12 lg:col-span-8 bg-white rounded-xl p-4 border border-gray-200 shadow-sm flex flex-col">
+                  <div className="flex items-center justify-between mb-2">
+                  <h2 className="text-2xl text-gray-900 font-semibold">Step 2: Knowledge Graph</h2>
+                    <div className="flex gap-2">
+                      <button onClick={() => downloadKgSvg(window._kgCy)}
+                        className="text-xs px-3 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition"
+                        title="Vector SVG for journal figures">
+                        Export SVG
+                      </button>
+                      <button onClick={() => {
+                        if (!window._kgCy) return;
+                        const png = window._kgCy.png({
+                          output: "blob",
+                          bg: "#ffffff",
+                          scale: FIGURE.kgPngScale,
+                          full: true,
+                        });
+                        const a = document.createElement("a");
+                        a.href = URL.createObjectURL(png);
+                        a.download = "kg_chain_view.png";
+                        a.click();
+                        URL.revokeObjectURL(a.href);
+                      }} className="text-xs px-3 py-1 bg-amber-500 hover:bg-amber-600 text-white rounded-lg transition"
+                        title="Raster fallback if SVG preview differs">
+                        Export PNG
+                      </button>
+                    </div>
+                  </div>
+                  {/* Let the canvas fill the available height. */}
+                  <div id="kg" className="flex-1 min-h-[480px] bg-gray-50 rounded-lg border border-gray-100 screen-only"></div>
+                  <div className="mt-3 flex flex-wrap gap-x-4 gap-y-2 text-xs text-gray-600 screen-only">
+                    <div className="flex items-center gap-2">
+                      <span className="inline-block w-3.5 h-3.5 rounded-full bg-blue-500 border border-white shadow-sm"></span>
+                      <span>Microbe</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="inline-block w-4 h-3 rounded-sm bg-amber-500 border border-white shadow-sm"></span>
+                      <span>Metabolite</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="inline-block w-3.5 h-3.5 bg-emerald-500 border border-white shadow-sm rotate-45"></span>
+                      <span>Pathway</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span
+                        className="inline-flex items-center justify-center w-4 h-4 bg-red-500 text-white text-[9px] leading-none shadow-sm"
+                        style={{ clipPath: "polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%)" }}
+                      ></span>
+                      <span>Disease</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="inline-block w-0 h-0 border-l-[8px] border-r-[8px] border-b-[14px] border-l-transparent border-r-transparent border-b-orange-500 drop-shadow-sm"></span>
+                      <span>Enzyme</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="inline-block w-0 h-0 border-l-[8px] border-r-[8px] border-t-[14px] border-l-transparent border-r-transparent border-t-cyan-500 drop-shadow-sm"></span>
+                      <span>Receptor</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="inline-block w-3.5 h-3.5 rounded-full bg-gray-400 border border-white shadow-sm"></span>
+                      <span>Unknown</span>
+                    </div>
+                  </div>
+                  <p className="text-xs text-gray-400 mt-2 screen-only">Click a node to view literature evidence below.</p>
+                  <div id="kg-evidence-panel" className="hidden mt-4 border-t border-gray-100 pt-4 screen-only">
+                    <h3 className="text-sm font-semibold text-gray-800 mb-2">Literature evidence</h3>
+                    <div id="kg-evidence-content" className="text-sm max-h-[360px] overflow-y-auto pr-1"></div>
+                  </div>
+                  {kgPrintImg && (
+                    <div className="print-only">
+                      <img src={kgPrintImg} alt="Step 2 Knowledge Graph" className="print-figure print-figure--vector print-figure--a4-landscape" />
+                    </div>
+                  )}
+                </div>
+
+                {/* Analysis */}
+                <div className="col-span-12 lg:col-span-4 bg-white rounded-xl p-4 border border-gray-200 shadow-sm flex flex-col">
+                  <h2 className="text-xl mb-2 text-gray-900">Analysis</h2>
+                  {selectedPair ? (
+                    <div className="flex-1 flex flex-col space-y-4">
+                      <div className="text-sm">
+                        <div className="flex justify-between mb-2">
+                          <span className="text-gray-500">MMSage Signal:</span>
+                          <span className="font-mono text-gray-800">{selectedPair.mmsage_norm.toFixed(3)}</span>
+                        </div>
+                        <div className="flex justify-between mb-2">
+                          <span className="text-gray-500">Microbe-Metabolite (bm):</span>
+                          <span className="font-mono text-gray-800">{selectedPair.pair_bm_exp ?? 0} papers</span>
+                        </div>
+                        <div className="flex justify-between mb-2">
+                          <span className="text-gray-500">Metabolite-Disease (md):</span>
+                          <span className="font-mono text-gray-800">{selectedPair.pair_md_exp ?? 0} papers</span>
+                        </div>
+                        <div className="flex justify-between font-semibold border-t border-gray-200 pt-2 mt-2">
+                          <span className="text-gray-700">Composite Score:</span>
+                          <span className="font-mono text-indigo-600">{(selectedPair.composite_score ?? 0).toFixed(2)}</span>
+                        </div>
+                        <div className="flex justify-between mt-2">
+                          <span className="text-gray-500">Novelty:</span>
+                          <span className="font-mono" style={{color: (selectedPair.novelty_score ?? 1) >= 1.0 ? "#d97706" : "#059669"}}>
+                            {(selectedPair.novelty_score ?? 0).toFixed(3)} {(selectedPair.novelty_score ?? 1) >= 1.0 ? "★ novel" : "known"}
+                          </span>
+                        </div>
+                      </div>
+                      {/* Push the blue summary box to the bottom. */}
+                      {analysisResult && (
+                        <div className="bg-indigo-50 rounded-lg p-3 border-l-4 border-indigo-500 mt-auto">
+                          <div className="text-xs font-semibold uppercase text-indigo-600 mb-1">Prioritization</div>
+                          <div className="text-sm text-indigo-900 font-medium">{analysisResult.prioritization}</div>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="text-gray-400 text-center flex-1 flex items-center justify-center">Select a candidate to view analysis</div>
+                  )}
+                </div>
+              </div>
+
+            </div>
+
+            {/* Full-width footer: Step 3 validation protocol. */}
+            <div id="step3-card" className="mt-6 bg-white rounded-xl p-5 border border-gray-200 shadow-sm">
+              <div className="border-b border-gray-100 pb-2 mb-3">
+                <h2 className="text-xl text-gray-900 font-semibold">Step 3: Evidence Gap and Follow-up Plan</h2>
+                <p className="mt-1 text-sm text-gray-500">
+                  First identify what is already known and what remains unknown, then propose the most useful follow-up experiment(s).
+                </p>
+              </div>
+              {loading && (
+                <p className="text-sm text-indigo-600 mb-2">Generating validation protocol...</p>
+              )}
+              {protocolError && (
+                <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                  {protocolError}
+                </div>
+              )}
+              {(loading || protocol) && (
+                <pre className="whitespace-pre-wrap text-base leading-relaxed text-gray-800 max-h-[600px] overflow-y-auto bg-gray-50/50 p-5 rounded-lg font-serif">
+                  {loading
+                    ? "Please wait while the validation protocol is being generated..."
+                    : protocol}
+                </pre>
+              )}
+
+              {protocol && (
+                <div className="mt-4 border-t border-gray-100 pt-4">
+                  <div className="flex items-start justify-between gap-4 flex-wrap">
+                    <div>
+                      <h3 className="text-sm font-semibold text-gray-900">Step 3 Summary Plan</h3>
+                      <p className="mt-1 text-sm text-gray-500">
+                        After reviewing the protocol above, add your own question or constraints, then run a separate evidence-driven plan with full-text methods, protocols.io operational references, and self-reflection.
+                      </p>
+                    </div>
+                    <button
+                      onClick={handleGenerateValidationPlan}
+                      disabled={loading || validationPlanLoading || !protocol.trim()}
+                      className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
+                        !loading && !validationPlanLoading && protocol.trim()
+                          ? "bg-emerald-600 hover:bg-emerald-700 text-white"
+                          : "bg-gray-200 text-gray-400 cursor-not-allowed"
+                      }`}
+                    >
+                      {validationPlanLoading ? "Generating Plan..." : "Generate Step 3 Summary"}
+                    </button>
+                  </div>
+                  <div className="mt-4 grid gap-3">
+                    <div>
+                      <label htmlFor="validation-research-question" className="block text-xs font-semibold uppercase tracking-wide text-gray-600">
+                        User Question
+                      </label>
+                      <textarea
+                        id="validation-research-question"
+                        value={validationResearchQuestion}
+                        onChange={(e) => setValidationResearchQuestion(e.target.value)}
+                        placeholder="Example: Focus on the most basic in vitro and in vivo validation steps, and prioritize common dose, time, grouping, and model settings."
+                        className="mt-1 min-h-[84px] w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-800 shadow-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
+                      />
+                    </div>
+                    <div>
+                      <label htmlFor="validation-prompt-constraints" className="block text-xs font-semibold uppercase tracking-wide text-gray-600">
+                        OPTIONAL CONTEXT / CONSTRAINTS
+                      </label>
+                      <textarea
+                        id="validation-prompt-constraints"
+                        value={validationPromptConstraints}
+                        onChange={(e) => setValidationPromptConstraints(e.target.value)}
+                        placeholder="Example: Do not emphasize mechanism research. Keep only basic operational content and avoid uncommon single-paper conditions unless broadly supported."
+                        className="mt-1 min-h-[72px] w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-800 shadow-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {validationPlanStatus && (validationPlanLoading || validationPlanStatus.status === "error") && (
+                <div className="mt-4 rounded-xl border border-indigo-200 bg-indigo-50/70 p-4">
+                  <div className="flex items-start justify-between gap-3 flex-wrap">
+                    <div>
+                      <h3 className="text-sm font-semibold text-indigo-900">
+                        {validationPlanStatus?.status === "error" ? "Validation Plan Failed" : "Validation Plan Running"}
+                      </h3>
+                      <p className="mt-1 text-sm text-indigo-800">
+                        {validationPlanStatus?.current_message || "Generating Step 3 evidence-gap summary..."}
+                      </p>
+                      {validationPlanJobId && (
+                        <p className="mt-1 text-xs text-indigo-600 font-mono">Job: {validationPlanJobId}</p>
+                      )}
+                    </div>
+                    <div className="min-w-[120px] text-right">
+                      <div className="text-lg font-semibold text-indigo-900">
+                        {validationPlanStatus?.progress_percent ?? 0}%
+                      </div>
+                      <div className="text-xs text-indigo-700">
+                        {formatValidationStage(validationPlanStatus?.current_stage)}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-indigo-100">
+                    <div
+                      className="h-full rounded-full bg-indigo-600 transition-all"
+                      style={{ width: `${Math.max(6, validationPlanStatus?.progress_percent ?? 6)}%` }}
+                    />
+                  </div>
+                  <div className="mt-4 grid gap-4 lg:grid-cols-[220px_minmax(0,1fr)]">
+                    <div className="rounded-lg border border-indigo-200 bg-white/80 p-3">
+                      <div className="text-xs font-semibold uppercase tracking-wide text-indigo-800">Current Stage</div>
+                      <div className="mt-2 text-sm font-medium text-gray-900">
+                        {formatValidationStage(validationPlanStatus?.current_stage)}
+                      </div>
+                      {validationPlanStatus?.candidate?.bacteria && (
+                        <div className="mt-3 text-xs text-gray-600 space-y-1">
+                          <div>Microbe: {validationPlanStatus.candidate.bacteria}</div>
+                          <div>Metabolite: {validationPlanStatus.candidate.metabolite}</div>
+                          <div>Disease: {validationPlanStatus.candidate.disease}</div>
+                        </div>
+                      )}
+                    </div>
+                    <div className="rounded-lg border border-indigo-200 bg-white/80 p-3">
+                      <div className="text-xs font-semibold uppercase tracking-wide text-indigo-800">Live Logs</div>
+                      {Array.isArray(validationPlanStatus?.logs) && validationPlanStatus.logs.length > 0 ? (
+                        <div className="mt-2 space-y-2 max-h-56 overflow-y-auto pr-1">
+                          {validationPlanStatus.logs.slice(-8).reverse().map((item, idx) => (
+                            <div key={`validation-log-${idx}`} className="rounded-lg border border-gray-200 bg-gray-50/80 p-2.5">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="text-xs font-semibold text-gray-900">{formatValidationStage(item.stage)}</span>
+                                <span className="text-xs text-gray-500">{item.progress_percent ?? 0}%</span>
+                                {item.timestamp && (
+                                  <span className="text-xs text-gray-400">{new Date(item.timestamp).toLocaleTimeString()}</span>
+                                )}
+                              </div>
+                              <p className="mt-1 text-sm text-gray-700">{item.message}</p>
+                              {item.extra && Object.keys(item.extra).length > 0 && (
+                                <p className="mt-1 text-xs text-gray-500">{Object.entries(item.extra).map(([k, v]) => `${k}: ${v}`).join(" | ")}</p>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="mt-2 text-sm text-gray-500">Waiting for backend logs...</p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+              {validationPlanError && (
+                <div className="mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                  {validationPlanError}
+                </div>
+              )}
+              {validationPlan && (
+                <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50/50 p-4">
+                  <div className="flex items-start justify-between gap-3 flex-wrap">
+                    <div>
+                      <h3 className="text-sm font-semibold text-emerald-950">Step 3 Summary Plan</h3>
+                      <p className="mt-1 text-sm text-emerald-900">
+                        The Step 3 output is now rendered as six fixed parts: known evidence, missing evidence gap, why this experiment, priority follow-up experiments, decision rule, and future complete study.
+                      </p>
+                      {(validationPlanStatus?.user_brief?.research_question || validationPlanStatus?.user_brief?.prompt_constraints) && (
+                        <div className="mt-3 rounded-lg border border-emerald-200 bg-white/80 px-3 py-3 text-sm text-emerald-950">
+                          <div className="font-semibold">Custom User Guidance Applied</div>
+                          <p className="mt-1">
+                            The validation plan incorporated the additional user question and prompt constraints for this run.
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                    {validationPlanStatus?.job_id && (
+                      <span className="text-xs font-mono text-emerald-700">Job: {validationPlanStatus.job_id}</span>
+                    )}
+                  </div>
+                  <pre className="mt-4 whitespace-pre-wrap text-base leading-relaxed text-gray-800 max-h-[900px] overflow-y-auto rounded-lg bg-white/90 p-5 font-serif">
+                    {validationPlan.validation_protocol_text || "Step 3 summary text was not returned."}
+                  </pre>
+                </div>
+              )}
+            </div>
+
+            <footer className="mt-8 text-center text-gray-400 text-sm">
+              MMSage-Insight | X: MMSage Signal | Y: Evidence Foundation (bm_exp + md_exp) |
+              ★ = Novel (chain_novelty=1, no triple experimental co-occurrence) |
+              Composite = MMSage × (1+log₂(1+bm)) × (1+log₂(1+md))
+            </footer>
+          </div>
+        );
+      }
+
+      ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+    </script>
+  </body>
+</html>

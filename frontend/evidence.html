@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Multi-Agent Evidence | MMSage</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+    <style>
+        .nav-link { @apply px-4 py-2 text-sm font-medium rounded-md; }
+        .nav-link.active { @apply bg-indigo-700 text-white; }
+        .nav-link:not(.active) { @apply text-indigo-200 hover:bg-indigo-600; }
+        .card { @apply bg-white rounded-lg shadow p-6; }
+        .hop-bar { height: 8px; border-radius: 4px; }
+        .db-badge-hit { @apply inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800; }
+        .db-badge-miss { @apply inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-500; }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen">
+    <nav class="bg-indigo-800 shadow-lg">
+        <div class="max-w-7xl mx-auto px-4">
+            <div class="flex items-center justify-between h-16">
+                <div class="flex items-center space-x-4">
+                    <h1 class="text-white text-lg font-bold">MMSage x Chain Novelty</h1>
+                    <a href="/" class="nav-link">Dashboard</a>
+                    <a href="/pipeline" class="nav-link">Pipeline</a>
+                    <a href="/evidence" class="nav-link active">Evidence</a>
+                    <a href="/graph" class="nav-link">KG Explorer</a>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <main class="max-w-7xl mx-auto px-4 py-6">
+        <!-- On-demand query -->
+        <div class="card mb-6">
+            <h2 class="text-lg font-semibold mb-4">On-Demand Agent Query</h2>
+            <div class="flex space-x-4 items-end">
+                <div>
+                    <label class="block text-sm text-gray-600 mb-1">Bacteria</label>
+                    <input id="q-bacteria" type="text" placeholder="e.g. Akkermansia muciniphila"
+                           class="border rounded px-3 py-2 text-sm w-64" />
+                </div>
+                <div>
+                    <label class="block text-sm text-gray-600 mb-1">Metabolite</label>
+                    <input id="q-metabolite" type="text" placeholder="e.g. butyrate"
+                           class="border rounded px-3 py-2 text-sm w-64" />
+                </div>
+                <div>
+                    <label class="block text-sm text-gray-600 mb-1">Disease</label>
+                    <input id="q-disease" type="text" value="IBD"
+                           class="border rounded px-3 py-2 text-sm w-40" />
+                </div>
+                <button id="btn-query" onclick="runQuery()"
+                        class="bg-indigo-600 text-white px-4 py-2 rounded text-sm hover:bg-indigo-700">
+                    Query
+                </button>
+            </div>
+            <div id="query-status" class="mt-2 text-sm text-gray-500"></div>
+        </div>
+
+        <!-- Single result detail -->
+        <div id="single-result" class="hidden">
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                <div class="card text-center">
+                    <div class="text-sm text-gray-500">Chain Novelty</div>
+                    <div class="text-4xl font-bold" id="sr-novelty">-</div>
+                    <div class="text-sm text-gray-400" id="sr-recommendation"></div>
+                </div>
+                <div class="card text-center">
+                    <div class="text-sm text-gray-500">Chain Count (raw + db_bonus)</div>
+                    <div class="text-2xl font-bold" id="sr-chain-count">-</div>
+                    <div class="text-sm text-gray-400" id="sr-chain-detail"></div>
+                </div>
+                <div class="card text-center">
+                    <div class="text-sm text-gray-500">Bottleneck</div>
+                    <div class="text-2xl font-bold text-red-500" id="sr-bottleneck">-</div>
+                </div>
+            </div>
+
+            <!-- Hop details -->
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                <div class="card" id="hop-mm">
+                    <h3 class="font-semibold text-sm mb-2">Microbe - Metabolite</h3>
+                    <div class="text-3xl font-bold mb-1" id="hop-mm-count">0</div>
+                    <div class="text-xs text-gray-500 mb-2">PubMed co-occurrences</div>
+                    <div id="hop-mm-dbs"></div>
+                    <div id="hop-mm-sources" class="mt-2 text-xs text-gray-500"></div>
+                </div>
+                <div class="card" id="hop-md">
+                    <h3 class="font-semibold text-sm mb-2">Metabolite - Disease</h3>
+                    <div class="text-3xl font-bold mb-1" id="hop-md-count">0</div>
+                    <div class="text-xs text-gray-500 mb-2">PubMed co-occurrences</div>
+                    <div id="hop-md-dbs"></div>
+                    <div id="hop-md-sources" class="mt-2 text-xs text-gray-500"></div>
+                </div>
+                <div class="card" id="hop-bd">
+                    <h3 class="font-semibold text-sm mb-2">Microbe - Disease (auxiliary)</h3>
+                    <div class="text-3xl font-bold mb-1" id="hop-bd-count">0</div>
+                    <div class="text-xs text-gray-500 mb-2">PubMed co-occurrences</div>
+                    <div id="hop-bd-dbs"></div>
+                    <div id="hop-bd-sources" class="mt-2 text-xs text-gray-500"></div>
+                </div>
+            </div>
+
+            <!-- Hop bar chart -->
+            <div class="card mb-6">
+                <h2 class="text-lg font-semibold mb-4">Hop Co-occurrence Comparison</h2>
+                <div id="hop-chart" style="height: 300px;"></div>
+            </div>
+
+            <!-- Sources -->
+            <div class="card">
+                <h2 class="text-lg font-semibold mb-4">All Evidence Sources</h2>
+                <ul id="sr-sources" class="list-disc list-inside text-sm text-gray-700 space-y-1"></ul>
+            </div>
+        </div>
+
+        <!-- Batch results table -->
+        <div class="card mt-6">
+            <h2 class="text-lg font-semibold mb-4">Batch Agent Evidence (from pipeline)</h2>
+            <div class="overflow-x-auto">
+                <table class="min-w-full divide-y divide-gray-200">
+                    <thead class="bg-gray-50">
+                        <tr>
+                            <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">#</th>
+                            <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Bacteria</th>
+                            <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Metabolite</th>
+                            <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">MM Count</th>
+                            <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">MD Count</th>
+                            <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">BD Count</th>
+                            <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">DB Bonus</th>
+                            <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Chain Novelty</th>
+                            <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Bottleneck</th>
+                        </tr>
+                    </thead>
+                    <tbody id="batch-table" class="bg-white divide-y divide-gray-200">
+                        <tr><td colspan="9" class="px-3 py-6 text-center text-gray-400">No batch data. Run pipeline first.</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </main>
+
+    <script>
+    function dbBadge(name, hit) {
+        return hit
+            ? `<span class="db-badge-hit">${name} &#10003;</span>`
+            : `<span class="db-badge-miss">${name} &#10007;</span>`;
+    }
+
+    function renderSingleResult(data) {
+        document.getElementById('single-result').classList.remove('hidden');
+
+        const novelty = data.chain_novelty != null ? data.chain_novelty : 1;
+        const noveltyEl = document.getElementById('sr-novelty');
+        noveltyEl.textContent = novelty.toFixed(4);
+        noveltyEl.className = `text-4xl font-bold ${novelty > 0.7 ? 'text-yellow-600' : novelty > 0.3 ? 'text-blue-600' : 'text-gray-600'}`;
+
+        document.getElementById('sr-recommendation').textContent = data.recommendation || '';
+        document.getElementById('sr-chain-count').textContent = data.chain_count || 0;
+        document.getElementById('sr-chain-detail').textContent = `raw: ${data.chain_count_raw||0} + db_bonus: ${data.db_bonus||0}`;
+
+        const bn = data.bottleneck || '';
+        document.getElementById('sr-bottleneck').textContent = bn.replace('_', '-');
+
+        // Hop counts
+        const hc = data.hop_counts || {};
+        document.getElementById('hop-mm-count').textContent = hc.microbe_metabolite || 0;
+        document.getElementById('hop-md-count').textContent = hc.metabolite_disease || 0;
+        document.getElementById('hop-bd-count').textContent = hc.microbe_disease || 0;
+
+        // DB hits per hop
+        const dbHits = data.db_hits || {};
+        for (const [hopType, prefix] of [['microbe_metabolite','hop-mm'],['metabolite_disease','hop-md'],['microbe_disease','hop-bd']]) {
+            const el = document.getElementById(`${prefix}-dbs`);
+            const hits = dbHits[hopType] || {};
+            el.innerHTML = Object.entries(hits).map(([k,v]) => dbBadge(k, v)).join(' ');
+        }
+
+        // Sources per hop
+        if (data.hop_evidence) {
+            for (const he of data.hop_evidence) {
+                const prefix = {microbe_metabolite:'hop-mm', metabolite_disease:'hop-md', microbe_disease:'hop-bd'}[he.hop_type];
+                if (prefix) {
+                    document.getElementById(`${prefix}-sources`).innerHTML = (he.sources||[]).map(s => `<div>${s}</div>`).join('');
+                }
+            }
+        }
+
+        // All sources
+        const srcEl = document.getElementById('sr-sources');
+        srcEl.innerHTML = (data.sources || []).map(s => `<li>${s}</li>`).join('');
+
+        // Bar chart
+        Plotly.newPlot('hop-chart', [{
+            x: ['Microbe-Metabolite', 'Metabolite-Disease', 'Microbe-Disease'],
+            y: [hc.microbe_metabolite||0, hc.metabolite_disease||0, hc.microbe_disease||0],
+            type: 'bar',
+            marker: {
+                color: [
+                    bn === 'microbe_metabolite' ? '#ef4444' : '#6366f1',
+                    bn === 'metabolite_disease' ? '#ef4444' : '#6366f1',
+                    '#9ca3af'
+                ]
+            },
+            text: [hc.microbe_metabolite||0, hc.metabolite_disease||0, hc.microbe_disease||0],
+            textposition: 'outside',
+        }], {
+            yaxis: {title: 'PubMed Co-occurrences'},
+            margin: {t: 20, b: 40},
+            annotations: bn ? [{
+                x: bn === 'microbe_metabolite' ? 0 : 1,
+                y: Math.max(hc.microbe_metabolite||0, hc.metabolite_disease||0) * 1.1,
+                text: 'Bottleneck',
+                showarrow: true, arrowhead: 2, font: {color: '#ef4444', size: 12},
+            }] : [],
+        }, {responsive: true});
+    }
+
+    async function runQuery() {
+        const bacteria = document.getElementById('q-bacteria').value.trim();
+        const metabolite = document.getElementById('q-metabolite').value.trim();
+        const disease = document.getElementById('q-disease').value.trim();
+        if (!bacteria || !metabolite) {
+            document.getElementById('query-status').textContent = 'Please enter bacteria and metabolite.';
+            return;
+        }
+        document.getElementById('query-status').textContent = 'Querying agents...';
+        document.getElementById('btn-query').disabled = true;
+        try {
+            const url = `/api/agent/query?bacteria=${encodeURIComponent(bacteria)}&metabolite=${encodeURIComponent(metabolite)}&disease=${encodeURIComponent(disease)}`;
+            const resp = await fetch(url);
+            const data = await resp.json();
+            if (data.error) {
+                document.getElementById('query-status').textContent = `Error: ${data.error}`;
+            } else {
+                document.getElementById('query-status').textContent = 'Done.';
+                renderSingleResult(data);
+            }
+        } catch (e) {
+            document.getElementById('query-status').textContent = `Failed: ${e.message}`;
+        }
+        document.getElementById('btn-query').disabled = false;
+    }
+
+    async function loadBatchData() {
+        try {
+            const data = await fetch('/api/step2b/agent_evidence').then(r => r.json());
+            if (!Array.isArray(data) || data.length === 0) return;
+            const tbody = document.getElementById('batch-table');
+            tbody.innerHTML = data.map((d, i) => {
+                const hc = d.hop_counts || {};
+                const bn = (d.bottleneck || '').replace('_', '-');
+                const nov = d.chain_novelty != null ? d.chain_novelty.toFixed(4) : '-';
+                return `<tr class="hover:bg-gray-50 cursor-pointer" onclick="document.getElementById('q-bacteria').value='${(d.bacteria||'').replace(/'/g,"\\'")}';document.getElementById('q-metabolite').value='${(d.metabolite||'').replace(/'/g,"\\'")}';runQuery();">
+                    <td class="px-3 py-2 text-sm">${i+1}</td>
+                    <td class="px-3 py-2 text-sm font-medium">${d.bacteria||'?'}</td>
+                    <td class="px-3 py-2 text-sm">${d.metabolite||'?'}</td>
+                    <td class="px-3 py-2 text-sm">${hc.microbe_metabolite||0}</td>
+                    <td class="px-3 py-2 text-sm">${hc.metabolite_disease||0}</td>
+                    <td class="px-3 py-2 text-sm">${hc.microbe_disease||0}</td>
+                    <td class="px-3 py-2 text-sm">${d.db_bonus||0}</td>
+                    <td class="px-3 py-2 text-sm font-medium">${nov}</td>
+                    <td class="px-3 py-2 text-sm text-red-500">${bn}</td>
+                </tr>`;
+            }).join('');
+        } catch (e) {}
+    }
+
+    // Auto-fill from URL params
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('bacteria')) document.getElementById('q-bacteria').value = params.get('bacteria');
+    if (params.get('metabolite')) document.getElementById('q-metabolite').value = params.get('metabolite');
+    if (params.get('bacteria') && params.get('metabolite')) runQuery();
+
+    loadBatchData();
+    </script>
+</body>
+</html>

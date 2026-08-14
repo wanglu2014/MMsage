@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MMSage x Chain Novelty</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+    <style>
+        .nav-link { @apply px-4 py-2 text-sm font-medium rounded-md; }
+        .nav-link.active { @apply bg-indigo-700 text-white; }
+        .nav-link:not(.active) { @apply text-indigo-200 hover:bg-indigo-600; }
+        .card { @apply bg-white rounded-lg shadow p-6; }
+        .dark-matter-badge { @apply inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-yellow-100 text-yellow-800; }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen">
+    <nav class="bg-indigo-800 shadow-lg">
+        <div class="max-w-7xl mx-auto px-4">
+            <div class="flex items-center justify-between h-16">
+                <div class="flex items-center space-x-4">
+                    <h1 class="text-white text-lg font-bold">MMSage x Chain Novelty</h1>
+                    <a href="/" class="nav-link active">Dashboard</a>
+                    <a href="/pipeline" class="nav-link">Pipeline</a>
+                    <a href="/evidence" class="nav-link">Evidence</a>
+                    <a href="/graph" class="nav-link">KG Explorer</a>
+                </div>
+                <div id="status-badge" class="text-indigo-200 text-sm">Loading...</div>
+            </div>
+        </div>
+    </nav>
+
+    <main class="max-w-7xl mx-auto px-4 py-6">
+        <!-- Summary Cards -->
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+            <div class="card">
+                <div class="text-sm text-gray-500">Total Candidates</div>
+                <div class="text-3xl font-bold text-gray-900" id="total-count">-</div>
+            </div>
+            <div class="card border-l-4 border-yellow-500">
+                <div class="text-sm text-gray-500">Q-I Dark Matter ★</div>
+                <div class="text-3xl font-bold text-yellow-600" id="q1-count">-</div>
+            </div>
+            <div class="card border-l-4 border-blue-500">
+                <div class="text-sm text-gray-500">Q-III Known Relations</div>
+                <div class="text-3xl font-bold text-blue-600" id="q3-count">-</div>
+            </div>
+            <div class="card border-l-4 border-gray-400">
+                <div class="text-sm text-gray-500">Pipeline Status</div>
+                <div class="text-lg font-bold" id="pipeline-status">-</div>
+            </div>
+        </div>
+
+        <!-- Quadrant Scatter Plot -->
+        <div class="card mb-6">
+            <h2 class="text-lg font-semibold mb-4">Dual-Axis Quadrant Plot (X = MMSage, Y = Chain Novelty)</h2>
+            <div id="quadrant-plot" style="height: 500px;"></div>
+        </div>
+
+        <!-- Top Candidates Table -->
+        <div class="card">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-lg font-semibold">Top Candidates</h2>
+                <div class="flex space-x-2">
+                    <select id="sort-by" class="text-sm border rounded px-2 py-1">
+                        <option value="mmsage">Sort by MMSage</option>
+                        <option value="chain_novelty">Sort by Chain Novelty</option>
+                        <option value="chain_count">Sort by Chain Count</option>
+                        <option value="quadrant">Sort by Quadrant</option>
+                    </select>
+                    <select id="filter-quadrant" class="text-sm border rounded px-2 py-1">
+                        <option value="">All Quadrants</option>
+                        <option value="I">I - Dark Matter ★</option>
+                        <option value="II">II - Novel, Weak Signal</option>
+                        <option value="III">III - Known Relationship</option>
+                        <option value="IV">IV - Low Priority</option>
+                    </select>
+                </div>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="min-w-full divide-y divide-gray-200">
+                    <thead class="bg-gray-50">
+                        <tr>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">#</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Bacteria</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Metabolite</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">MMSage</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Chain Count</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Chain Novelty</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Quadrant</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">KG Path / Bottleneck</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Agent Evidence</th>
+                        </tr>
+                    </thead>
+                    <tbody id="candidates-table" class="bg-white divide-y divide-gray-200">
+                        <tr><td colspan="9" class="px-4 py-8 text-center text-gray-400">No data. Run the pipeline first.</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </main>
+
+    <script>
+    const QUADRANT_COLORS = {'I': '#eab308', 'II': '#f97316', 'III': '#3b82f6', 'IV': '#9ca3af'};
+    const QUADRANT_NAMES = {'I': 'Dark Matter ★', 'II': 'Novel, Weak Signal', 'III': 'Known Relationship', 'IV': 'Low Priority'};
+    let allData = [];
+
+    async function loadData() {
+        try {
+            let data = await fetch('/api/step3/quadrant').then(r => r.json());
+            if (Array.isArray(data) && data.length > 0) {
+                allData = data;
+                updateDashboard(data);
+            }
+        } catch (e) {
+            console.error('Failed to load data:', e);
+        }
+
+        try {
+            const status = await fetch('/api/pipeline/status').then(r => r.json());
+            document.getElementById('pipeline-status').textContent = status.status || 'idle';
+            document.getElementById('status-badge').textContent =
+                `Steps: ${(status.steps_completed || []).join(', ') || 'none'}`;
+        } catch (e) {}
+    }
+
+    function updateDashboard(data) {
+        const qCounts = {I: 0, II: 0, III: 0, IV: 0};
+        data.forEach(d => { qCounts[d.quadrant] = (qCounts[d.quadrant] || 0) + 1; });
+
+        document.getElementById('total-count').textContent = data.length;
+        document.getElementById('q1-count').textContent = qCounts.I || 0;
+        document.getElementById('q3-count').textContent = qCounts.III || 0;
+
+        renderQuadrantPlot(data);
+        renderTable(data);
+    }
+
+    function renderQuadrantPlot(data) {
+        const traces = {};
+        data.forEach(d => {
+            const q = d.quadrant;
+            if (!traces[q]) {
+                traces[q] = {
+                    x: [], y: [], text: [], mode: 'markers',
+                    name: `${q} - ${QUADRANT_NAMES[q]}`,
+                    marker: {
+                        color: QUADRANT_COLORS[q],
+                        size: q === 'I' ? 12 : 8,
+                        symbol: q === 'I' ? 'star' : 'circle',
+                    },
+                    type: 'scatter',
+                };
+            }
+            traces[q].x.push(d.mmsage_norm);
+            traces[q].y.push(d.chain_novelty);
+            traces[q].text.push(`${d.bacteria || '?'} x ${d.metabolite || '?'}<br>chain_count=${d.chain_count || 0}`);
+        });
+
+        // Compute adaptive thresholds (median of each axis)
+        const xVals = data.map(d => d.mmsage_norm || 0).sort((a,b) => a-b);
+        const yVals = data.map(d => d.chain_novelty != null ? d.chain_novelty : 1).sort((a,b) => a-b);
+        const n = xVals.length;
+        const xThresh = n ? (xVals[Math.floor(n/2)] + xVals[Math.floor((n-1)/2)]) / 2 : 0.5;
+        const yThresh = n ? (yVals[Math.floor(n/2)] + yVals[Math.floor((n-1)/2)]) / 2 : 0.5;
+        const xMin = n ? Math.min(...xVals) : 0;
+
+        const layout = {
+            xaxis: {title: `MMSage Signal (threshold: ${xThresh.toFixed(3)})`, range: [xMin - 0.02, 1.05]},
+            yaxis: {title: `Chain Novelty (threshold: ${yThresh.toFixed(3)})`, range: [-0.05, 1.1]},
+            shapes: [
+                {type: 'line', x0: xThresh, x1: xThresh, y0: -0.05, y1: 1.1,
+                 line: {dash: 'dash', color: '#666', width: 1}},
+                {type: 'line', x0: xMin - 0.02, x1: 1.05, y0: yThresh, y1: yThresh,
+                 line: {dash: 'dash', color: '#666', width: 1}},
+            ],
+            annotations: [
+                {x: 0.85, y: 0.95, xref: 'paper', yref: 'paper', text: '<b>I: Dark Matter ★</b>', showarrow: false, font: {color: '#eab308', size: 13}},
+                {x: 0.15, y: 0.95, xref: 'paper', yref: 'paper', text: 'II: Novel, Weak', showarrow: false, font: {color: '#f97316', size: 11}},
+                {x: 0.85, y: 0.05, xref: 'paper', yref: 'paper', text: 'III: Known', showarrow: false, font: {color: '#3b82f6', size: 11}},
+                {x: 0.15, y: 0.05, xref: 'paper', yref: 'paper', text: 'IV: Low Priority', showarrow: false, font: {color: '#9ca3af', size: 11}},
+            ],
+            hovermode: 'closest',
+            margin: {t: 20},
+        };
+
+        Plotly.newPlot('quadrant-plot', Object.values(traces), layout, {responsive: true});
+
+        document.getElementById('quadrant-plot').on('plotly_click', function(evt) {
+            const pt = evt.points[0];
+            if (pt) {
+                const text = pt.text;
+                const m = text.match(/^(.+?) x (.+?)(?:<br>|$)/);
+                if (m) {
+                    window.location.href = `/candidate?bacteria=${encodeURIComponent(m[1])}&metabolite=${encodeURIComponent(m[2])}`;
+                }
+            }
+        });
+    }
+
+    function renderTable(data) {
+        const tbody = document.getElementById('candidates-table');
+        if (!data.length) return;
+
+        const rows = data.map((d, i) => {
+            const qBadge = d.is_dark_matter
+                ? `<span class="dark-matter-badge">${d.quadrant} ★</span>`
+                : `<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium" style="background:${QUADRANT_COLORS[d.quadrant]}20;color:${QUADRANT_COLORS[d.quadrant]}">${d.quadrant}</span>`;
+
+            let pathInfo = '';
+            if (d.chain_path_str) {
+                pathInfo = d.chain_path_str;
+                if (d.bottleneck_edge) {
+                    pathInfo += ` | Bottleneck: ${d.bottleneck_edge.source}→${d.bottleneck_edge.target} (${d.bottleneck_edge.cooccurrence})`;
+                }
+            } else {
+                pathInfo = '<span class="text-gray-400">No KG path</span>';
+            }
+            if (pathInfo.length > 80) pathInfo = pathInfo.substring(0, 77) + '...';
+
+            // Agent evidence summary
+            let agentInfo = '';
+            if (d.agent_hop_counts) {
+                const hc = d.agent_hop_counts;
+                agentInfo = `MM:${hc.microbe_metabolite||0} MD:${hc.metabolite_disease||0} BD:${hc.microbe_disease||0}`;
+                if (d.agent_db_bonus > 0) agentInfo += ` +${d.agent_db_bonus}db`;
+            }
+
+            return `<tr class="hover:bg-gray-50 cursor-pointer" onclick="window.location='/candidate?bacteria=${encodeURIComponent(d.bacteria||'')}&metabolite=${encodeURIComponent(d.metabolite||'')}'">
+                <td class="px-4 py-2 text-sm text-gray-500">${i+1}</td>
+                <td class="px-4 py-2 text-sm font-medium">${d.bacteria || '?'}</td>
+                <td class="px-4 py-2 text-sm">${d.metabolite || '?'}</td>
+                <td class="px-4 py-2 text-sm">${(d.mmsage_norm || 0).toFixed(3)}</td>
+                <td class="px-4 py-2 text-sm">${d.chain_count != null ? d.chain_count : '-'}</td>
+                <td class="px-4 py-2 text-sm font-medium">${(d.chain_novelty != null ? d.chain_novelty : 1).toFixed(3)}</td>
+                <td class="px-4 py-2 text-sm">${qBadge}</td>
+                <td class="px-4 py-2 text-sm text-gray-500">${pathInfo}</td>
+                <td class="px-4 py-2 text-sm text-gray-500">${agentInfo}</td>
+            </tr>`;
+        });
+        tbody.innerHTML = rows.join('');
+    }
+
+    document.getElementById('sort-by').addEventListener('change', function() {
+        const field = this.value;
+        const sorted = [...allData].sort((a, b) => {
+            if (field === 'mmsage') return (b.mmsage_norm || 0) - (a.mmsage_norm || 0);
+            if (field === 'chain_novelty') return (b.chain_novelty || 0) - (a.chain_novelty || 0);
+            if (field === 'chain_count') return (a.chain_count || 0) - (b.chain_count || 0);
+            if (field === 'quadrant') return (a.quadrant || 'Z').localeCompare(b.quadrant || 'Z');
+            return 0;
+        });
+        renderTable(sorted);
+    });
+
+    document.getElementById('filter-quadrant').addEventListener('change', function() {
+        const q = this.value;
+        const filtered = q ? allData.filter(d => d.quadrant === q) : allData;
+        renderTable(filtered);
+    });
+
+    loadData();
+    </script>
+</body>
+</html>

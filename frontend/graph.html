@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KG Explorer - MMSage + ScoreSP</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/cytoscape@3.28.1/dist/cytoscape.min.js"></script>
+    <script src="https://unpkg.com/dagre@0.8.5/dist/dagre.min.js"></script>
+    <script src="https://unpkg.com/cytoscape-dagre@2.5.0/cytoscape-dagre.js"></script>
+    <style>
+        #cy { width: 100%; height: 650px; border: 1px solid #e5e7eb; border-radius: 0.5rem; }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen">
+    <nav class="bg-indigo-800 shadow-lg">
+        <div class="max-w-7xl mx-auto px-4">
+            <div class="flex items-center justify-between h-16">
+                <div class="flex items-center space-x-4">
+                    <h1 class="text-white text-lg font-bold">MMSage x Chain Novelty</h1>
+                    <a href="/" class="px-4 py-2 text-sm font-medium rounded-md text-indigo-200 hover:bg-indigo-600">Dashboard</a>
+                    <a href="/pipeline" class="px-4 py-2 text-sm font-medium rounded-md text-indigo-200 hover:bg-indigo-600">Pipeline</a>
+                    <a href="/evidence" class="px-4 py-2 text-sm font-medium rounded-md text-indigo-200 hover:bg-indigo-600">Evidence</a>
+                    <a href="/graph" class="px-4 py-2 text-sm font-medium rounded-md bg-indigo-700 text-white">KG Explorer</a>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <main class="max-w-7xl mx-auto px-4 py-6">
+        <!-- Controls -->
+        <div class="bg-white rounded-lg shadow p-4 mb-4 flex flex-wrap items-end gap-3">
+            <div>
+                <label class="text-sm text-gray-500 block">Search Node</label>
+                <input id="search-node" type="text" placeholder="e.g. Akkermansia"
+                       class="border rounded px-3 py-1.5 text-sm w-44">
+            </div>
+            <div>
+                <label class="text-sm text-gray-500 block">Filter by Type</label>
+                <select id="filter-type" class="border rounded px-3 py-1.5 text-sm">
+                    <option value="">All</option>
+                    <option value="microbe">Microbe</option>
+                    <option value="metabolite">Metabolite</option>
+                    <option value="pathway">Pathway</option>
+                    <option value="disease">Disease</option>
+                    <option value="enzyme">Enzyme</option>
+                    <option value="receptor">Receptor</option>
+                </select>
+            </div>
+            <button onclick="loadGraph()" class="bg-indigo-600 text-white px-4 py-1.5 rounded text-sm hover:bg-indigo-700">Load Full</button>
+            <button onclick="resetView()" class="bg-gray-200 text-gray-700 px-4 py-1.5 rounded text-sm hover:bg-gray-300">Reset View</button>
+
+            <div class="border-l pl-3 ml-1">
+                <label class="text-sm text-gray-500 block">Chain View</label>
+                <div class="flex items-center gap-2">
+                    <input id="chain-bacteria" type="text" placeholder="Bacteria" class="border rounded px-2 py-1.5 text-sm w-36">
+                    <input id="chain-metabolite" type="text" placeholder="Metabolite" class="border rounded px-2 py-1.5 text-sm w-36">
+                    <input id="chain-disease" type="text" placeholder="Disease" value="IBD" class="border rounded px-2 py-1.5 text-sm w-24">
+                    <button onclick="loadChainView()" class="bg-emerald-600 text-white px-4 py-1.5 rounded text-sm hover:bg-emerald-700 whitespace-nowrap">Chain View</button>
+                </div>
+            </div>
+
+            <button onclick="exportPNG()" class="bg-amber-500 text-white px-4 py-1.5 rounded text-sm hover:bg-amber-600 ml-auto">Export PNG</button>
+            <div class="text-sm text-gray-500" id="graph-stats">-</div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-4 gap-4">
+            <!-- Graph -->
+            <div class="lg:col-span-3 bg-white rounded-lg shadow p-2">
+                <div id="cy"></div>
+            </div>
+
+            <!-- Edge/Node Info Panel -->
+            <div class="bg-white rounded-lg shadow p-4">
+                <h3 class="font-semibold mb-3">Details</h3>
+                <div id="info-panel" class="text-sm text-gray-600">
+                    <p class="text-gray-400">Click a node or edge to see details</p>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script>
+    const TYPE_COLORS = {
+        microbe: '#3b82f6', metabolite: '#22c55e', pathway: '#a855f7',
+        disease: '#ef4444', enzyme: '#f97316', receptor: '#06b6d4', unknown: '#9ca3af'
+    };
+    const TYPE_SHAPES = {
+        microbe: 'ellipse', metabolite: 'round-rectangle', pathway: 'diamond',
+        disease: 'hexagon', enzyme: 'triangle', receptor: 'vee'
+    };
+
+    let cy = null;
+    let currentMode = 'full'; // 'full' or 'chain'
+
+    // --- Shared styles ---
+    const baseNodeStyle = {
+        'label': 'data(label)',
+        'text-valign': 'bottom',
+        'text-halign': 'center',
+        'text-margin-y': 6,
+        'font-size': '10px',
+        'text-wrap': 'wrap',
+        'text-max-width': '100px',
+        'width': 40, 'height': 40,
+        'background-color': function(ele) { return TYPE_COLORS[ele.data('type')] || '#9ca3af'; },
+        'shape': function(ele) { return TYPE_SHAPES[ele.data('type')] || 'ellipse'; },
+        'color': '#333',
+        'border-width': 1,
+        'border-color': '#e5e7eb',
+    };
+
+    const baseEdgeStyle = {
+        'width': 2,
+        'line-color': '#d1d5db',
+        'target-arrow-color': '#d1d5db',
+        'target-arrow-shape': 'triangle',
+        'curve-style': 'bezier',
+        'label': 'data(relation)',
+        'font-size': '8px',
+        'text-rotation': 'autorotate',
+        'color': '#999',
+    };
+
+    // --- Full graph mode (original cose layout) ---
+    function initCytoscapeFull(elements) {
+        if (cy) cy.destroy();
+        currentMode = 'full';
+
+        cy = cytoscape({
+            container: document.getElementById('cy'),
+            elements: elements,
+            style: [
+                { selector: 'node', style: baseNodeStyle },
+                { selector: 'edge', style: baseEdgeStyle },
+                { selector: 'node:selected', style: { 'border-width': 3, 'border-color': '#1e40af' } },
+                { selector: 'edge:selected', style: { 'line-color': '#1e40af', 'target-arrow-color': '#1e40af', 'width': 3 } },
+                { selector: '.highlighted', style: { 'border-width': 3, 'border-color': '#eab308', 'background-color': '#fef3c7' } },
+            ],
+            layout: { name: 'cose', idealEdgeLength: 120, nodeOverlap: 30, padding: 30 }
+        });
+        bindClickHandlers();
+    }
+
+    // --- Chain view mode (dagre left-to-right layout) ---
+    function initCytoscapeChain(elements) {
+        if (cy) cy.destroy();
+        currentMode = 'chain';
+
+        cy = cytoscape({
+            container: document.getElementById('cy'),
+            elements: elements,
+            style: [
+                // Non-core nodes: small, semi-transparent
+                {
+                    selector: 'node',
+                    style: {
+                        ...baseNodeStyle,
+                        'width': 32, 'height': 32,
+                        'font-size': '9px',
+                        'text-max-width': '80px',
+                        'opacity': 0.6,
+                        'border-width': 1,
+                        'border-color': '#d1d5db',
+                    }
+                },
+                // Core nodes: large, bold, fully opaque
+                {
+                    selector: 'node[?is_core]',
+                    style: {
+                        'width': 65, 'height': 65,
+                        'font-size': '13px',
+                        'font-weight': 'bold',
+                        'text-max-width': '120px',
+                        'opacity': 1,
+                        'border-width': 3,
+                        'border-color': '#1e293b',
+                    }
+                },
+                // Non-chain edges: thin, light
+                {
+                    selector: 'edge',
+                    style: {
+                        ...baseEdgeStyle,
+                        'width': 1.5,
+                        'line-color': '#e5e7eb',
+                        'target-arrow-color': '#e5e7eb',
+                        'line-style': 'dashed',
+                        'font-size': '7px',
+                        'color': '#bbb',
+                        'opacity': 0.5,
+                    }
+                },
+                // Chain edges: thick, solid, dark
+                {
+                    selector: 'edge[?is_chain]',
+                    style: {
+                        'width': 4,
+                        'line-color': '#1e40af',
+                        'target-arrow-color': '#1e40af',
+                        'target-arrow-shape': 'triangle',
+                        'line-style': 'solid',
+                        'font-size': '10px',
+                        'font-weight': 'bold',
+                        'color': '#1e40af',
+                        'opacity': 1,
+                    }
+                },
+                { selector: 'node:selected', style: { 'border-width': 4, 'border-color': '#eab308' } },
+                { selector: 'edge:selected', style: { 'line-color': '#eab308', 'target-arrow-color': '#eab308', 'width': 5 } },
+            ],
+            layout: {
+                name: 'dagre',
+                rankDir: 'LR',
+                nodeSep: 60,
+                rankSep: 140,
+                edgeSep: 30,
+                padding: 40,
+            }
+        });
+        bindClickHandlers();
+    }
+
+    function bindClickHandlers() {
+        cy.on('tap', 'node', function(evt) {
+            const data = evt.target.data();
+            let html = `<p class="font-medium text-base mb-2">${data.label || data.id}</p>`;
+            html += `<p><span class="text-gray-400">Type:</span> ${data.type || '?'}</p>`;
+            if (data.is_core) html += `<p><span class="text-emerald-600 font-medium">Core: ${data.core_role}</span></p>`;
+            if (data.description) html += `<p class="mt-2">${data.description}</p>`;
+            if (data.kegg_id) html += `<p class="mt-1"><a href="https://www.kegg.jp/entry/${data.kegg_id}" target="_blank" class="text-indigo-600 hover:underline">KEGG: ${data.kegg_id}</a></p>`;
+            const edges = evt.target.connectedEdges();
+            html += `<p class="mt-2 text-gray-400">Connected edges: ${edges.length}</p>`;
+            document.getElementById('info-panel').innerHTML = html;
+        });
+
+        cy.on('tap', 'edge', function(evt) {
+            const data = evt.target.data();
+            let html = `<p class="font-medium text-base mb-2">${data.source} &rarr; ${data.target}</p>`;
+            html += `<p><span class="text-gray-400">Relation:</span> ${data.relation || '?'}</p>`;
+            if (data.is_chain) html += `<p><span class="text-blue-700 font-medium">Chain edge</span></p>`;
+            if (data.description) html += `<p class="mt-2">${data.description}</p>`;
+            if (data.impact_factor) html += `<p><span class="text-gray-400">IF:</span> ${data.impact_factor}</p>`;
+            if (data.citation_count) html += `<p><span class="text-gray-400">Citations:</span> ${data.citation_count}</p>`;
+            if (data.pmid) html += `<p class="mt-1"><a href="https://pubmed.ncbi.nlm.nih.gov/${data.pmid}" target="_blank" class="text-indigo-600 hover:underline">PMID: ${data.pmid}</a></p>`;
+            document.getElementById('info-panel').innerHTML = html;
+        });
+    }
+
+    // --- Load full graph (original mode) ---
+    async function loadGraph() {
+        const search = document.getElementById('search-node').value.trim();
+        const filterType = document.getElementById('filter-type').value;
+
+        let url = '/api/graph/full';
+        if (search) {
+            url = `/api/graph/subgraph?bacteria=${encodeURIComponent(search)}&metabolite=${encodeURIComponent(search)}&max_hop=2`;
+        }
+
+        try {
+            const data = await fetch(url).then(r => r.json());
+            let nodes = data.nodes || [];
+            let edges = data.edges || [];
+
+            if (filterType) {
+                const visibleNodes = new Set(nodes.filter(n => n.data.type === filterType).map(n => n.data.id));
+                edges.forEach(e => {
+                    if (visibleNodes.has(e.data.source)) visibleNodes.add(e.data.target);
+                    if (visibleNodes.has(e.data.target)) visibleNodes.add(e.data.source);
+                });
+                nodes = nodes.filter(n => visibleNodes.has(n.data.id));
+                edges = edges.filter(e => visibleNodes.has(e.data.source) && visibleNodes.has(e.data.target));
+            }
+
+            document.getElementById('graph-stats').textContent =
+                `${nodes.length} nodes, ${edges.length} edges`;
+
+            initCytoscapeFull([...nodes, ...edges]);
+
+            if (search && cy) {
+                cy.nodes().forEach(n => {
+                    if (n.data('id').toLowerCase().includes(search.toLowerCase())) {
+                        n.addClass('highlighted');
+                    }
+                });
+            }
+        } catch (e) {
+            document.getElementById('graph-stats').textContent = 'Error: ' + e.message;
+        }
+    }
+
+    // --- Load chain view (focused single-chain mode) ---
+    async function loadChainView() {
+        const bacteria = document.getElementById('chain-bacteria').value.trim();
+        const metabolite = document.getElementById('chain-metabolite').value.trim();
+        const disease = document.getElementById('chain-disease').value.trim() || 'IBD';
+
+        if (!bacteria || !metabolite) {
+            alert('Please enter both Bacteria and Metabolite for Chain View.');
+            return;
+        }
+
+        const url = `/api/graph/chain?bacteria=${encodeURIComponent(bacteria)}&metabolite=${encodeURIComponent(metabolite)}&disease=${encodeURIComponent(disease)}`;
+
+        try {
+            const data = await fetch(url).then(r => r.json());
+            if (data.error) {
+                document.getElementById('graph-stats').textContent = data.error;
+                return;
+            }
+
+            const nodes = data.nodes || [];
+            const edges = data.edges || [];
+
+            document.getElementById('graph-stats').textContent =
+                `Chain View: ${nodes.length} nodes, ${edges.length} edges`;
+
+            initCytoscapeChain([...nodes, ...edges]);
+        } catch (e) {
+            document.getElementById('graph-stats').textContent = 'Error: ' + e.message;
+        }
+    }
+
+    // --- Export PNG (high-res, white background) ---
+    function exportPNG() {
+        if (!cy) { alert('No graph loaded.'); return; }
+
+        const png = cy.png({
+            output: 'blob',
+            bg: '#ffffff',
+            scale: 3,
+            full: true,
+        });
+
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(png);
+        const timestamp = new Date().toISOString().slice(0, 10);
+        link.download = `kg_${currentMode}_${timestamp}.png`;
+        link.click();
+        URL.revokeObjectURL(link.href);
+    }
+
+    function resetView() {
+        if (cy) cy.fit();
+    }
+
+    // Load full graph on init
+    loadGraph();
+    </script>
+</body>
+</html>

@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Results Catalog | Microbe–Metabolite</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 min-h-screen">
+    <header class="bg-indigo-800 shadow-lg">
+        <div class="max-w-7xl mx-auto px-4 flex items-center justify-between h-16 gap-4">
+            <div class="flex items-center gap-4">
+                <a href="/dashboard"
+                    class="text-indigo-100 hover:text-white text-sm font-medium whitespace-nowrap">
+                    &larr; Back to Dashboard
+                </a>
+                <h1 class="text-white text-lg font-bold">Results Catalog</h1>
+            </div>
+            <div id="catalog-stats" class="text-indigo-200 text-sm">Loading...</div>
+        </div>
+    </header>
+
+    <main class="max-w-7xl mx-auto px-4 py-6">
+        <div class="bg-white rounded-lg shadow p-6 mb-6">
+            <p class="text-sm text-gray-500 mb-4">
+                Archived results (JSON). Sorted by quadrant group, then MMSage (high to low).
+            </p>
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-3">
+                <input id="q" type="text" placeholder="Keyword (microbe / metabolite)"
+                    class="border rounded px-3 py-2 text-sm lg:col-span-2" />
+                <input id="bacteria" type="text" placeholder="Filter by microbe"
+                    class="border rounded px-3 py-2 text-sm" />
+                <input id="metabolite" type="text" placeholder="Filter by metabolite"
+                    class="border rounded px-3 py-2 text-sm" />
+                <select id="quadrant" class="border rounded px-3 py-2 text-sm">
+                    <option value="">All quadrants</option>
+                    <option value="I">I - Dark Matter</option>
+                    <option value="II">II</option>
+                    <option value="III">III</option>
+                    <option value="IV">IV</option>
+                </select>
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mt-3">
+                <select id="run-id" class="border rounded px-3 py-2 text-sm">
+                    <option value="">All runs</option>
+                </select>
+                <input id="disease" type="text" placeholder="Disease (e.g. IBD)"
+                    class="border rounded px-3 py-2 text-sm" />
+                <button id="search-btn" class="bg-indigo-600 text-white rounded px-4 py-2 text-sm hover:bg-indigo-700">
+                    Search
+                </button>
+            </div>
+        </div>
+
+        <div class="bg-white rounded-lg shadow overflow-x-auto">
+            <table class="min-w-full divide-y divide-gray-200">
+                <thead class="bg-gray-50">
+                    <tr>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Run</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Microbe</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Metabolite</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Disease</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">MMSage</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Novelty</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Quadrant</th>
+                    </tr>
+                </thead>
+                <tbody id="results-body" class="bg-white divide-y divide-gray-200">
+                    <tr><td colspan="7" class="px-4 py-8 text-center text-gray-400">Loading...</td></tr>
+                </tbody>
+            </table>
+        </div>
+        <p id="result-hint" class="text-sm text-gray-500 mt-3"></p>
+    </main>
+
+    <script>
+    const QUADRANT_COLORS = {'I': '#eab308', 'II': '#f97316', 'III': '#3b82f6', 'IV': '#9ca3af'};
+    const QUADRANT_HEADERS = {
+        'I': 'Quadrant I — Dark Matter ★',
+        'II': 'Quadrant II — Novel, Weak Signal',
+        'III': 'Quadrant III — Known Relationship',
+        'IV': 'Quadrant IV — Low Priority',
+    };
+    const QUADRANT_ORDER = ['I', 'II', 'III', 'IV'];
+
+    function sortByQuadrantAndMmsage(rows) {
+        return [...rows].sort((a, b) => {
+            const qi = QUADRANT_ORDER.indexOf(a.quadrant) - QUADRANT_ORDER.indexOf(b.quadrant);
+            if (qi !== 0) return qi;
+            return (b.mmsage_norm ?? 0) - (a.mmsage_norm ?? 0);
+        });
+    }
+
+    function recordUrl(r) {
+        return `/browse/record?run_id=${encodeURIComponent(r.run_id)}&bacteria=${encodeURIComponent(r.bacteria)}&metabolite=${encodeURIComponent(r.metabolite)}`;
+    }
+
+    async function loadRuns() {
+        try {
+            const runs = await fetch('/api/catalog/runs').then(r => r.json());
+            const sel = document.getElementById('run-id');
+            (runs || []).forEach(run => {
+                const opt = document.createElement('option');
+                opt.value = run.run_id;
+                opt.textContent = `${run.run_id} (${run.candidate_count ?? '?'} records, ${run.disease || ''})`;
+                sel.appendChild(opt);
+            });
+            document.getElementById('catalog-stats').textContent =
+                `${(runs || []).length} archived run(s)`;
+        } catch (e) {
+            document.getElementById('catalog-stats').textContent = 'No archives';
+        }
+    }
+
+    function renderGroupedRows(rows) {
+        const sorted = sortByQuadrantAndMmsage(rows);
+        const html = [];
+        let lastQ = null;
+
+        sorted.forEach(r => {
+            if (r.quadrant !== lastQ) {
+                lastQ = r.quadrant;
+                html.push(`<tr class="bg-gray-100">
+                    <td colspan="7" class="px-4 py-2 text-xs font-semibold text-gray-700 uppercase tracking-wide">
+                        ${QUADRANT_HEADERS[r.quadrant] || 'Quadrant ' + r.quadrant}
+                    </td>
+                </tr>`);
+            }
+            const qColor = QUADRANT_COLORS[r.quadrant] || '#666';
+            const runShort = (r.run_id || '').length > 28
+                ? (r.run_id || '').slice(0, 25) + '...' : (r.run_id || '');
+            const url = recordUrl(r);
+            html.push(`<tr class="hover:bg-gray-50 cursor-pointer" onclick="window.location='${url}'">
+                <td class="px-4 py-2 text-xs text-gray-500" title="${r.run_id}">${runShort}</td>
+                <td class="px-4 py-2 text-sm font-medium">${r.bacteria}</td>
+                <td class="px-4 py-2 text-sm">${r.metabolite}</td>
+                <td class="px-4 py-2 text-sm">${r.disease || '-'}</td>
+                <td class="px-4 py-2 text-sm">${(r.mmsage_norm ?? 0).toFixed(3)}</td>
+                <td class="px-4 py-2 text-sm">${(r.chain_novelty ?? 1).toFixed(3)}</td>
+                <td class="px-4 py-2 text-sm"><span style="color:${qColor}">${r.quadrant}${r.is_dark_matter ? ' ★' : ''}</span></td>
+            </tr>`);
+        });
+        return html.join('');
+    }
+
+    async function doSearch() {
+        const params = new URLSearchParams();
+        const q = document.getElementById('q').value.trim();
+        const bacteria = document.getElementById('bacteria').value.trim();
+        const metabolite = document.getElementById('metabolite').value.trim();
+        const quadrant = document.getElementById('quadrant').value;
+        const disease = document.getElementById('disease').value.trim();
+        const runId = document.getElementById('run-id').value;
+        if (q) params.set('q', q);
+        if (bacteria) params.set('bacteria', bacteria);
+        if (metabolite) params.set('metabolite', metabolite);
+        if (quadrant) params.set('quadrant', quadrant);
+        if (disease) params.set('disease', disease);
+        if (runId) params.set('run_id', runId);
+        params.set('limit', '500');
+
+        const tbody = document.getElementById('results-body');
+        tbody.innerHTML = '<tr><td colspan="7" class="px-4 py-8 text-center text-gray-400">Searching...</td></tr>';
+
+        try {
+            const data = await fetch('/api/catalog/search?' + params.toString()).then(r => r.json());
+            const rows = data.records || [];
+            document.getElementById('result-hint').textContent =
+                `${data.total ?? 0} match(es), showing ${rows.length} (grouped by quadrant, MMSage ↓)`;
+
+            if (!rows.length) {
+                tbody.innerHTML = '<tr><td colspan="7" class="px-4 py-8 text-center text-gray-400">No results.</td></tr>';
+                return;
+            }
+            tbody.innerHTML = renderGroupedRows(rows);
+        } catch (e) {
+            tbody.innerHTML = `<tr><td colspan="7" class="px-4 py-8 text-center text-red-500">Failed: ${e.message}</td></tr>`;
+        }
+    }
+
+    document.getElementById('search-btn').addEventListener('click', doSearch);
+    ['q', 'bacteria', 'metabolite', 'disease'].forEach(id => {
+        document.getElementById(id).addEventListener('keydown', e => {
+            if (e.key === 'Enter') doSearch();
+        });
+    });
+
+    loadRuns().then(doSearch);
+    </script>
+</body>
+</html>

@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Candidate Detail - MMSage x Chain Novelty</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 min-h-screen">
+    <nav class="bg-indigo-800 shadow-lg">
+        <div class="max-w-7xl mx-auto px-4">
+            <div class="flex items-center justify-between h-16">
+                <div class="flex items-center space-x-4">
+                    <h1 class="text-white text-lg font-bold">MMSage x Chain Novelty</h1>
+                    <a href="/" class="px-4 py-2 text-sm font-medium rounded-md text-indigo-200 hover:bg-indigo-600">Dashboard</a>
+                    <a href="/pipeline" class="px-4 py-2 text-sm font-medium rounded-md text-indigo-200 hover:bg-indigo-600">Pipeline</a>
+                    <a href="/evidence" class="px-4 py-2 text-sm font-medium rounded-md text-indigo-200 hover:bg-indigo-600">Evidence</a>
+                    <a href="/graph" class="px-4 py-2 text-sm font-medium rounded-md text-indigo-200 hover:bg-indigo-600">KG Explorer</a>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <main class="max-w-4xl mx-auto px-4 py-6">
+        <div class="mb-4">
+            <a id="back-link" href="/browse" class="text-indigo-600 hover:underline text-sm">&larr; Back to Results Catalog</a>
+        </div>
+
+        <!-- Candidate Header -->
+        <div class="bg-white rounded-lg shadow p-6 mb-6">
+            <div class="flex items-center justify-between">
+                <div>
+                    <h2 class="text-2xl font-bold" id="candidate-title">Loading...</h2>
+                    <p class="text-gray-500 mt-1" id="candidate-subtitle"></p>
+                </div>
+                <div id="quadrant-badge" class="text-center">
+                    <div class="text-4xl font-bold" id="quadrant-label">-</div>
+                    <div class="text-sm text-gray-500" id="quadrant-name"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Scores -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+            <div class="bg-white rounded-lg shadow p-4">
+                <div class="text-sm text-gray-500">MMSage Signal</div>
+                <div class="text-2xl font-bold text-indigo-600" id="val-mmsage">-</div>
+                <div class="text-xs text-gray-400" id="val-rank"></div>
+            </div>
+            <div class="bg-white rounded-lg shadow p-4">
+                <div class="text-sm text-gray-500">Chain Count</div>
+                <div class="text-2xl font-bold text-green-600" id="val-chain-count">-</div>
+                <div class="text-xs text-gray-400" id="val-pairwise"></div>
+            </div>
+            <div class="bg-white rounded-lg shadow p-4">
+                <div class="text-sm text-gray-500">Chain Novelty</div>
+                <div class="text-2xl font-bold" id="val-novelty">-</div>
+                <div class="text-xs text-gray-400">1 = completely novel, 0 = well-studied</div>
+            </div>
+        </div>
+
+        <!-- Path Visualization -->
+        <div class="bg-white rounded-lg shadow p-6 mb-6">
+            <h3 class="text-lg font-semibold mb-4">Knowledge Graph Path</h3>
+            <div id="path-display" class="text-center py-4">
+                <span class="text-gray-400">No KG path found</span>
+            </div>
+        </div>
+
+        <!-- Edge Co-occurrence -->
+        <div class="bg-white rounded-lg shadow p-6 mb-6">
+            <h3 class="text-lg font-semibold mb-4">PubMed Co-occurrence</h3>
+            <div id="pairwise-detail" class="text-sm text-gray-700"></div>
+            <h4 class="font-medium text-sm text-gray-500 mt-4 mb-2">Per-edge Breakdown</h4>
+            <div id="edge-table"></div>
+        </div>
+
+        <!-- View in KG Explorer -->
+        <div class="bg-white rounded-lg shadow p-6">
+            <h3 class="text-lg font-semibold mb-4">Explore in Knowledge Graph</h3>
+            <a id="kg-link" href="/graph" class="text-indigo-600 hover:underline">View in KG Explorer &rarr;</a>
+        </div>
+    </main>
+
+    <script>
+    const QUADRANT_COLORS = {'I': '#eab308', 'II': '#f97316', 'III': '#3b82f6', 'IV': '#9ca3af'};
+    const QUADRANT_NAMES = {'I': 'Dark Matter', 'II': 'Novel but Weak Signal', 'III': 'Known Relationship', 'IV': 'Low Priority'};
+
+    async function loadCandidate() {
+        const params = new URLSearchParams(window.location.search);
+        const bacteria = params.get('bacteria');
+        const metabolite = params.get('metabolite');
+        const runId = params.get('run_id');
+
+        if (!bacteria || !metabolite) {
+            document.getElementById('candidate-title').textContent = 'No candidate specified';
+            return;
+        }
+
+        if (!runId) {
+            document.getElementById('back-link').href = '/';
+            document.getElementById('back-link').textContent = '← Back to Dashboard';
+        }
+
+        try {
+            let item = null;
+
+            if (runId) {
+                const res = await fetch(
+                    `/api/catalog/record?run_id=${encodeURIComponent(runId)}&bacteria=${encodeURIComponent(bacteria)}&metabolite=${encodeURIComponent(metabolite)}`
+                );
+                if (res.ok) {
+                    item = await res.json();
+                }
+            } else {
+                const data3 = await fetch('/api/step3/quadrant').then(r => r.json());
+                if (Array.isArray(data3)) {
+                    item = data3.find(d => d.bacteria === bacteria && d.metabolite === metabolite);
+                }
+                if (item) {
+                    try {
+                        const data2 = await fetch('/api/step2/chain_novelty').then(r => r.json());
+                        if (Array.isArray(data2)) {
+                            const step2Item = data2.find(d => d.bacteria === bacteria && d.metabolite === metabolite);
+                            if (step2Item) {
+                                item.pairwise_counts = step2Item.pairwise_counts || item.pairwise_counts;
+                            }
+                        }
+                    } catch (e) {}
+                }
+            }
+
+            if (item) {
+                if (runId) {
+                    const sub = document.getElementById('candidate-subtitle');
+                    sub.textContent = (sub.textContent || '') + ` | Run: ${runId}`;
+                }
+                renderCandidate(item);
+            } else {
+                document.getElementById('candidate-title').textContent = `${bacteria} x ${metabolite} - Not found in results`;
+            }
+        } catch (e) {
+            document.getElementById('candidate-title').textContent = 'Error loading data: ' + e.message;
+        }
+    }
+
+    function renderCandidate(item) {
+        const cand = item.candidate || {};
+
+        // Header
+        document.getElementById('candidate-title').textContent =
+            `${item.bacteria || '?'} x ${item.metabolite || '?'}`;
+        document.getElementById('candidate-subtitle').textContent =
+            item.has_path ? 'KG path found' : 'No KG path (PubMed pair search only)';
+
+        // Quadrant badge
+        const q = item.quadrant || '?';
+        const ql = document.getElementById('quadrant-label');
+        ql.textContent = q + (item.is_dark_matter ? ' ★' : '');
+        ql.style.color = QUADRANT_COLORS[q] || '#666';
+        document.getElementById('quadrant-name').textContent = QUADRANT_NAMES[q] || '';
+
+        // Scores
+        document.getElementById('val-mmsage').textContent = (item.mmsage_norm || 0).toFixed(4);
+        document.getElementById('val-rank').textContent =
+            `Rank: ${cand.rank_in_microbe || '?'}/${cand.total_in_microbe || '?'}`;
+        document.getElementById('val-chain-count').textContent = item.chain_count != null ? item.chain_count : '-';
+        document.getElementById('val-novelty').textContent = (item.chain_novelty != null ? item.chain_novelty : 1).toFixed(4);
+        document.getElementById('val-novelty').style.color =
+            item.chain_novelty > 0.8 ? '#eab308' : item.chain_novelty < 0.3 ? '#3b82f6' : '#666';
+
+        // Pairwise counts
+        const pw = item.pairwise_counts || {};
+        if (Object.keys(pw).length) {
+            let html = '<div class="grid grid-cols-2 md:grid-cols-4 gap-2">';
+            const labels = {
+                'pair_bm': 'Bacteria+Metabolite',
+                'triple_bmd': 'Bact+Met+Disease',
+                'pair_bd': 'Bacteria+Disease',
+                'pair_md': 'Metabolite+Disease',
+                'full_chain': 'Full Chain'
+            };
+            for (const [key, label] of Object.entries(labels)) {
+                if (pw[key] !== undefined) {
+                    html += `<div class="bg-gray-50 rounded p-2 text-center">
+                        <div class="text-xs text-gray-400">${label}</div>
+                        <div class="text-lg font-bold">${pw[key]}</div>
+                    </div>`;
+                }
+            }
+            html += '</div>';
+            document.getElementById('val-pairwise').innerHTML =
+                `pair_bm=${pw.pair_bm||0}, triple=${pw.triple_bmd||0}`;
+            document.getElementById('pairwise-detail').innerHTML = html;
+        }
+
+        // Path
+        if (item.chain_path_str) {
+            const pathParts = item.chain_path_str.split(' -> ');
+            const pathHtml = pathParts.map((p, i) => {
+                return `<span class="inline-block px-3 py-1 rounded-full text-sm font-medium bg-indigo-100 text-indigo-800">${p}</span>` +
+                       (i < pathParts.length - 1 ? '<span class="mx-2 text-gray-400">&rarr;</span>' : '');
+            }).join('');
+            document.getElementById('path-display').innerHTML = pathHtml;
+        }
+
+        // Edge co-occurrences
+        const edges = item.edge_cooccurrences || [];
+        if (edges.length) {
+            let html = '<table class="w-full text-sm"><thead><tr class="text-xs text-gray-500 border-b">' +
+                '<th class="text-left py-1">Source</th><th class="text-left">Relation</th>' +
+                '<th class="text-left">Target</th><th class="text-right">Co-occurrence</th></tr></thead><tbody>';
+            edges.forEach(e => {
+                const isBottleneck = item.bottleneck_edge &&
+                    e.source === item.bottleneck_edge.source && e.target === item.bottleneck_edge.target;
+                const cls = isBottleneck ? 'bg-yellow-50 font-medium' : '';
+                html += `<tr class="border-t ${cls}">
+                    <td class="py-1">${e.source}</td>
+                    <td>${e.relation}</td>
+                    <td>${e.target}</td>
+                    <td class="text-right">${e.cooccurrence}${isBottleneck ? ' (bottleneck)' : ''}</td>
+                </tr>`;
+            });
+            html += '</tbody></table>';
+            document.getElementById('edge-table').innerHTML = html;
+        } else {
+            document.getElementById('edge-table').innerHTML =
+                '<p class="text-gray-400 text-sm">No edge data (no KG path)</p>';
+        }
+
+        // KG link
+        document.getElementById('kg-link').href =
+            `/graph?search=${encodeURIComponent(item.bacteria || '')}`;
+    }
+
+    loadCandidate();
+    </script>
+</body>
+</html>

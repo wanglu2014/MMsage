@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pipeline Control - MMSage x Chain Novelty</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 min-h-screen">
+    <nav class="bg-indigo-800 shadow-lg">
+        <div class="max-w-7xl mx-auto px-4">
+            <div class="flex items-center justify-between h-16">
+                <div class="flex items-center space-x-4">
+                    <h1 class="text-white text-lg font-bold">MMSage x Chain Novelty</h1>
+                    <a href="/" class="px-4 py-2 text-sm font-medium rounded-md text-indigo-200 hover:bg-indigo-600">Dashboard</a>
+                    <a href="/pipeline" class="px-4 py-2 text-sm font-medium rounded-md bg-indigo-700 text-white">Pipeline</a>
+                    <a href="/evidence" class="px-4 py-2 text-sm font-medium rounded-md text-indigo-200 hover:bg-indigo-600">Evidence</a>
+                    <a href="/graph" class="px-4 py-2 text-sm font-medium rounded-md text-indigo-200 hover:bg-indigo-600">KG Explorer</a>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <main class="max-w-4xl mx-auto px-4 py-6">
+        <!-- Pipeline Steps -->
+        <div class="bg-white rounded-lg shadow p-6 mb-6">
+            <h2 class="text-lg font-semibold mb-4">Pipeline Progress</h2>
+            <div class="flex items-center justify-between mb-6">
+                <div class="flex-1" id="step-indicators">
+                    <div class="flex items-center">
+                        <div class="step-dot w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold bg-gray-200 text-gray-600" id="dot-1">1</div>
+                        <div class="flex-1 h-1 bg-gray-200 mx-2" id="line-1"></div>
+                        <div class="step-dot w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold bg-gray-200 text-gray-600" id="dot-2">2</div>
+                        <div class="flex-1 h-1 bg-gray-200 mx-2" id="line-2"></div>
+                        <div class="step-dot w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold bg-gray-200 text-gray-600" id="dot-3">3</div>
+                    </div>
+                    <div class="flex justify-between mt-2 text-xs text-gray-500">
+                        <span>MMSage Signal</span>
+                        <span>Chain Novelty</span>
+                        <span>Quadrant</span>
+                    </div>
+                </div>
+            </div>
+            <div class="text-center">
+                <span class="text-sm font-medium" id="status-text">Status: idle</span>
+            </div>
+        </div>
+
+        <!-- Configuration -->
+        <div class="bg-white rounded-lg shadow p-6 mb-6">
+            <h2 class="text-lg font-semibold mb-4">Configuration</h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Coordinates Directory</label>
+                    <input id="cfg-coords" type="text" class="w-full border rounded px-3 py-2 text-sm"
+                           value="data/sample_coordinates">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Bacteria Filter (optional)</label>
+                    <input id="cfg-filter" type="text" class="w-full border rounded px-3 py-2 text-sm"
+                           placeholder="e.g. Akkermansia">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Top-N Candidates</label>
+                    <input id="cfg-topn" type="number" class="w-full border rounded px-3 py-2 text-sm" value="200">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Disease Context</label>
+                    <input id="cfg-disease" type="text" class="w-full border rounded px-3 py-2 text-sm" value="IBD">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Max KG Depth</label>
+                    <input id="cfg-depth" type="number" class="w-full border rounded px-3 py-2 text-sm" value="3">
+                </div>
+            </div>
+            <div class="mt-6 flex space-x-4">
+                <button onclick="runPipeline()" id="run-btn"
+                        class="px-6 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 font-medium">
+                    Run Pipeline
+                </button>
+                <button onclick="checkStatus()"
+                        class="px-4 py-2 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300 text-sm">
+                    Refresh Status
+                </button>
+            </div>
+        </div>
+
+        <!-- Log Output -->
+        <div class="bg-white rounded-lg shadow p-6">
+            <h2 class="text-lg font-semibold mb-4">Log</h2>
+            <pre id="log-output" class="bg-gray-900 text-green-400 p-4 rounded text-sm font-mono h-64 overflow-y-auto">
+Waiting for pipeline run...
+</pre>
+        </div>
+    </main>
+
+    <script>
+    let pollInterval = null;
+
+    async function runPipeline() {
+        const config = {
+            coordinates_dir: document.getElementById('cfg-coords').value,
+            bacteria_filter: document.getElementById('cfg-filter').value || null,
+            top_n: parseInt(document.getElementById('cfg-topn').value) || 200,
+            disease: document.getElementById('cfg-disease').value || 'IBD',
+            max_depth: parseInt(document.getElementById('cfg-depth').value) || 3,
+        };
+
+        appendLog('Starting pipeline...');
+        document.getElementById('run-btn').disabled = true;
+        document.getElementById('run-btn').textContent = 'Running...';
+
+        try {
+            const resp = await fetch('/api/pipeline/run', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(config),
+            });
+            const result = await resp.json();
+            appendLog('Pipeline triggered: ' + JSON.stringify(result));
+
+            if (!pollInterval) {
+                pollInterval = setInterval(checkStatus, 3000);
+            }
+        } catch (e) {
+            appendLog('ERROR: ' + e.message);
+            document.getElementById('run-btn').disabled = false;
+            document.getElementById('run-btn').textContent = 'Run Pipeline';
+        }
+    }
+
+    async function checkStatus() {
+        try {
+            const resp = await fetch('/api/pipeline/status');
+            const status = await resp.json();
+
+            document.getElementById('status-text').textContent = 'Status: ' + status.status;
+
+            const completed = status.steps_completed || [];
+            for (let i = 1; i <= 3; i++) {
+                const dot = document.getElementById('dot-' + i);
+                if (completed.includes(i)) {
+                    dot.className = 'step-dot w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold bg-green-500 text-white';
+                } else if (status.current_step === i && status.status === 'running') {
+                    dot.className = 'step-dot w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold bg-indigo-500 text-white animate-pulse';
+                }
+                if (i < 3) {
+                    const line = document.getElementById('line-' + i);
+                    if (completed.includes(i)) {
+                        line.className = 'flex-1 h-1 bg-green-500 mx-2';
+                    }
+                }
+            }
+
+            if (status.status === 'completed' || status.status === 'error') {
+                if (pollInterval) { clearInterval(pollInterval); pollInterval = null; }
+                document.getElementById('run-btn').disabled = false;
+                document.getElementById('run-btn').textContent = 'Run Pipeline';
+                appendLog('Pipeline ' + status.status + (status.error ? ': ' + status.error : ''));
+            }
+        } catch (e) {
+            appendLog('Status check failed: ' + e.message);
+        }
+    }
+
+    function appendLog(msg) {
+        const log = document.getElementById('log-output');
+        const time = new Date().toLocaleTimeString();
+        log.textContent += `\n[${time}] ${msg}`;
+        log.scrollTop = log.scrollHeight;
+    }
+
+    async function loadConfig() {
+        try {
+            const resp = await fetch('/api/config');
+            if (!resp.ok) return;
+            const config = await resp.json();
+            if (config.coordinates_dir) document.getElementById('cfg-coords').value = config.coordinates_dir;
+            if (config.top_n != null) document.getElementById('cfg-topn').value = config.top_n;
+            if (config.disease) document.getElementById('cfg-disease').value = config.disease;
+            if (config.max_depth != null) document.getElementById('cfg-depth').value = config.max_depth;
+        } catch (e) {
+            appendLog('Configuration load failed: ' + e.message);
+        }
+    }
+
+    loadConfig();
+    checkStatus();
+    </script>
+</body>
+</html>
