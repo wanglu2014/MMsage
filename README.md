@@ -54,6 +54,11 @@ The platform produces:
 │   ├── browse.html                    # Result browser (new)
 │   ├── browse_record.html             # Single-record view (new)
 │   └── kg_evidence.js                 # Knowledge-graph evidence view (new)
+├── r_pipeline/
+│   ├── M1_targets_clr.R               # Resolve target CAGs/metabolites and create the CLR cache
+│   ├── M2_root_select.R               # Select Noback metabolite roots from Spearman matrices
+│   ├── M3_pluscombno1.R               # Calculate sample-level CAG-metabolite interaction scores
+│   └── M4_trajectory.R                # Run Monocle 3 trajectory and pseudotime analysis
 ├── data/
 │   ├── sample_coordinates/            # Example coordinate input
 │   ├── knowledge_graph/               # GML knowledge graphs
@@ -64,6 +69,24 @@ The platform produces:
 ```
 
 `backend/db_checkers/sapbert_index/` is not shipped (769 MB); rebuild it with `python backend/db_checkers/build_sapbert_index.py` when SapBERT-based post-retrieval alignment is needed.
+
+## R preprocessing and trajectory pipeline
+
+The four scripts in `r_pipeline/` form a separate upstream preprocessing and trajectory workflow:
+
+```text
+M1_targets_clr.R -> M2_root_select.R --+
+                 -> M3_pluscombno1.R --+-> M4_trajectory.R
+```
+
+| Stage | Script | Purpose | Main inputs | Main outputs |
+|---|---|---|---|---|
+| M1 | `M1_targets_clr.R` | Maps the configured target microbes to CAGs, resolves target-metabolite synonyms, and applies a within-sample CLR transformation to the microbe and metabolite abundance matrices. | `data/taxon_names.tsv`, `data/microbes_wide.tsv`, `data/metabolites_wide.tsv` | `mmsage_out/M1_cache.rds`, containing the target mappings and CLR matrices |
+| M2 | `M2_root_select.R` | Reuses the existing Spearman correlation and P-value matrices to retain positively correlated metabolites with `P < 0.05`, ranks them by mean CLR abundance, and creates Noback root sets for `NArank` values 1, 2, 3, and 5. | `M1_cache.rds`, `results/method02_spearman_matrix.tsv`, `results/method02_spearman_pvalues.tsv` | `mmsage_out/roots/all_roots_noback.csv` |
+| M3 | `M3_pluscombno1.R` | For each target CAG, calculates the sample-level interaction score `sCor = CLR(metabolite) * CLR(microbe)` for every metabolite and reshapes the result to long format. | CLR matrices and target CAGs in `M1_cache.rds` | One `mmsage_out/pluscomb/pluscombno1_<CAG>.csv` file per target CAG |
+| M4 | `M4_trajectory.R` | Treats metabolites as Monocle 3 cells and samples as features, then runs PCA/UMAP, clustering, graph learning, and root-based pseudotime ordering over a parameter grid. It supports smoke tests, resumable runs, and parallel workers. | M1 target CAGs, M2 root sets, and M3 per-CAG interaction files | `mmsage_out/coords/coords_<CAG>_seed1_<config>_NArank<N>.csv` plus progress and summary logs in `mmsage_out/logs/` |
+
+Run M1 first, M2 and M3 in either order, and M4 last. This R workflow is not invoked by `backend/run_pipeline.py`. All four scripts currently set `MC` to the same hard-coded metacard data root, so update that value for the local environment before running them.
 
 ## Packaged results
 
