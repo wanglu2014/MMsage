@@ -1,7 +1,9 @@
 # MMSage platform dependencies
-# Derived by static import analysis of backend/ and tests/ in this snapshot.
+# Python dependencies for the web app, abundance jobs and downstream evidence pipeline.
 # backend/requirements.txt is a one-line `-r ../requirements.txt` pointing here.
-# Requires Python 3.10 or newer.
+# Requires Python 3.10 or newer; deployment uses Python 3.11.
+# R and its packages are installed separately; see README.md: R environment.
+# These are minimum-version ranges, not a reproducibility lockfile.
 
 # --- Web service (backend/api_server.py) ---
 fastapi>=0.104
@@ -13,6 +15,7 @@ python-multipart>=0.0.6      # required by api_server.py: `file: UploadFile = Fi
 networkx>=3.0                # knowledge-graph build, traversal, .gml I/O
 numpy>=1.23
 pandas>=1.5
+scipy>=1.10                 # Spearman matrices and uploaded abundance correlation ranking
 
 # --- Literature retrieval ---
 biopython>=1.81              # Bio.Entrez, used by agents/pubmed_query.py and build_kg.py

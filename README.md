@@ -24,6 +24,8 @@ The platform produces:
 0810_MMSage_Platform/
 ├── backend/
 │   ├── api_server.py                  # FastAPI server and static frontend entry point
+│   ├── correlation_job_runner.py      # Uploaded abundance matrices -> R M1–M4 -> ranking CSV/ZIP
+│   ├── reference_inputs.py            # Validate/align matrices and derive Spearman reference tables
 │   ├── run_pipeline.py                # Full Step 1 -> KG build -> Step 2 -> Step 2b -> Step 3 pipeline
 │   ├── step1_mmsage_signal.py         # Extract candidate pairs and Rank values from MMSage coordinates
 │   ├── step2_chain_novelty.py         # Chain Novelty scoring using KG paths and PubMed co-occurrence
@@ -47,7 +49,7 @@ The platform produces:
 │   ├── MMSage_Dashboard.html          # Main dashboard
 │   ├── dashboard.compiled.js          # Dashboard logic, A4/150 dpi render sizes (new)
 │   ├── index.html                     # Entry page
-│   ├── pipeline.html                  # Coordinate upload and pipeline launch page
+│   ├── pipeline.html                  # Abundance upload, M1–M4 progress and result downloads
 │   ├── evidence.html                  # Agent evidence browser
 │   ├── graph.html                     # Knowledge-graph explorer
 │   ├── candidate.html                 # Single-candidate detail page
@@ -58,7 +60,8 @@ The platform produces:
 │   ├── M1_targets_clr.R               # Resolve target CAGs/metabolites and create the CLR cache
 │   ├── M2_root_select.R               # Select Noback metabolite roots from Spearman matrices
 │   ├── M3_pluscombno1.R               # Calculate sample-level CAG-metabolite interaction scores
-│   └── M4_trajectory.R                # Run Monocle 3 trajectory and pseudotime analysis
+│   ├── M4_trajectory.R                # Run trajectory and pseudotime analysis
+│   └── trajectory_core/               # Bundled matrix trajectory runtime and its dependencies
 ├── data/
 │   ├── sample_coordinates/            # Example coordinate input
 │   ├── knowledge_graph/               # GML knowledge graphs
@@ -72,21 +75,95 @@ The platform produces:
 
 ## R preprocessing and trajectory pipeline
 
-The four scripts in `r_pipeline/` form a separate upstream preprocessing and trajectory workflow:
+The `/pipeline` page accepts two abundance matrices and starts an independent background job through `backend/correlation_job_runner.py`. Python validates and aligns the tables, computes Spearman reference matrices, and invokes the four R scripts sequentially using `subprocess` and `Rscript`:
 
 ```text
-M1_targets_clr.R -> M2_root_select.R --+
-                 -> M3_pluscombno1.R --+-> M4_trajectory.R
+Two CSV/TSV abundance tables -> reference_inputs.py -> M1 -> M2 -> M3 -> M4
+                                                           -> ranking CSVs and ZIP
 ```
 
-| Stage | Script | Purpose | Main inputs | Main outputs |
-|---|---|---|---|---|
-| M1 | `M1_targets_clr.R` | Maps the configured target microbes to CAGs, resolves target-metabolite synonyms, and applies a within-sample CLR transformation to the microbe and metabolite abundance matrices. | `data/taxon_names.tsv`, `data/microbes_wide.tsv`, `data/metabolites_wide.tsv` | `mmsage_out/M1_cache.rds`, containing the target mappings and CLR matrices |
-| M2 | `M2_root_select.R` | Reuses the existing Spearman correlation and P-value matrices to retain positively correlated metabolites with `P < 0.05`, ranks them by mean CLR abundance, and creates Noback root sets for `NArank` values 1, 2, 3, and 5. | `M1_cache.rds`, `results/method02_spearman_matrix.tsv`, `results/method02_spearman_pvalues.tsv` | `mmsage_out/roots/all_roots_noback.csv` |
-| M3 | `M3_pluscombno1.R` | For each target CAG, calculates the sample-level interaction score `sCor = CLR(metabolite) * CLR(microbe)` for every metabolite and reshapes the result to long format. | CLR matrices and target CAGs in `M1_cache.rds` | One `mmsage_out/pluscomb/pluscombno1_<CAG>.csv` file per target CAG |
-| M4 | `M4_trajectory.R` | Treats metabolites as Monocle 3 cells and samples as features, then runs PCA/UMAP, clustering, graph learning, and root-based pseudotime ordering over a parameter grid. It supports smoke tests, resumable runs, and parallel workers. | M1 target CAGs, M2 root sets, and M3 per-CAG interaction files | `mmsage_out/coords/coords_<CAG>_seed1_<config>_NArank<N>.csv` plus progress and summary logs in `mmsage_out/logs/` |
+This workflow is separate from the downstream literature/KG workflow in `backend/run_pipeline.py`.
 
-Run M1 first, M2 and M3 in either order, and M4 last. This R workflow is not invoked by `backend/run_pipeline.py`. All four scripts currently set `MC` to the same hard-coded metacard data root, so update that value for the local environment before running them.
+| Stage | Script | Purpose | Main outputs under the job output directory |
+|---|---|---|---|
+| M1 | `M1_targets_clr.R` | Resolve matching input microbe IDs; normalize within samples and apply RCLR; filter metabolites by mean normalized abundance (default `0.0026`). | `M1_cache.rds` |
+| M2 | `M2_root_select.R` | Select positive Spearman edges below the requested P threshold, rank eligible metabolites by mean CLR abundance, and form root sets for NArank 1, 2, 3 and 5. If no edge qualifies, try finite positive edges, then finite edges. | `roots/all_roots_noback.csv` |
+| M3 | `M3_pluscombno1.R` | Calculate sample-level `sCor = CLR(metabolite) * CLR(microbe)` interaction matrices. | `pluscomb/pluscombno1_<CAG>.csv` |
+| M4 | `M4_trajectory.R` | Run PCA/UMAP, clustering, graph learning and root-based pseudotime ordering using the bundled matrix runtime. | `coords/*.csv`, `logs/*` |
+
+### Upload format and controls
+
+- Use UTF-8 CSV or TSV tables with a header row, feature IDs in the first column and sample IDs in the remaining columns. Rows represent microbes or metabolites; values must be finite numeric abundances.
+- Feature and sample IDs must be nonempty and unique. At least three sample IDs must be shared; the staged tables follow the metabolite table's sample order.
+- `Target Microbe (Optional)` filters input row names. Leave blank for all microbes, enter a complete ID for a specific microbe, or enter `Cyanobacteria` to match IDs containing that text (for example `rplo 1 (Cyanobacteria)`). Matching is based on the input names, not an external taxonomy lookup.
+- `Top-N Results per Microbe` (page default 50) limits the correlation ranking for each microbe; it does not truncate the trajectory coordinates.
+- `Significance Threshold (P-value)` (page default 0.05) controls root eligibility and the correlation table's `Significant` flag. The correlation CSV retains nonsignificant rows within Top-N. The API default, when omitted, is 1.0.
+- `Configuration` uses `num_dim,neighbors,min_dist,metric,cluster_res`; the page defaults to `20,3,0.5,cosine,0.1`.
+
+### Job outputs and interpretation
+
+Each task is stored under `data/jobs/<job_id>/`: `analysis/` holds staged input/reference tables, `outputs/` holds results, and `status.json` holds progress.
+
+| Output under `outputs/` | Contents |
+|---|---|
+| `correlation_ranking.csv` | `Microbe`, `Metabolite`, Spearman `Correlation`, `P_value`, `Significant`, and descending-correlation `Rank`; calculated from uploaded abundances. |
+| `trajectory_ranking.csv` | `metabolite`, `Pseudotime`, `Rank`, `Configuration`; sorted by pseudotime separately for each coordinate configuration. |
+| `coords/coords_<CAG>_seed1_<config>_NArank<N>.csv` | `metabolite`, `rowcolumn`, `UMAP1`, `UMAP2`, `Pseudotime`. |
+| `coords/<CAG>_newseed_1_<config>_NArank<N>_coordinates.csv` | TreeMM-style export with `Row.names`, `CellID`, `Pseudotime`, and PC columns. The exporter pads to at least 18 PC columns; unavailable components are `NA`. |
+| `roots/all_roots_noback.csv` | Selected roots and their NArank, correlation, P-value and CLR mean. |
+| `logs/M4_summary.log`, `*.R.log` | Per-configuration outcomes and R diagnostics. |
+| `trajectory_results.zip` | Ranking tables, coordinate exports, root tables and logs. |
+
+Correlation rank and pseudotime rank answer different questions. TreeMM-style exports describe the current run; compatible column names do not guarantee reproduction of the bundled TreeMM example's values or complete PC values. Very small inputs can use a deterministic coordinate fallback rather than the full trajectory model. If some configurations fail but coordinate files exist, M4 currently allows the job to complete; inspect `logs/M4_summary.log` for coverage before interpreting the result as complete for every requested CAG. Compatibility exports are generated on the regular trajectory path.
+
+When a task completes, the page displays **Download results ZIP**, **Download ranking CSV**, and **Output location** with the job ID. Existing downloaded ZIPs do not change after a deployment; submit a new task to obtain the current export format.
+
+### R environment
+
+Use Python 3.10+ (the deployment uses 3.11) and an R installation compatible with the following packages (the deployment uses R 4.5.3). Python discovers `Rscript` on `PATH`, or uses the explicit `MMSAGE_RSCRIPT` environment variable. R packages are installed separately from `requirements.txt`.
+
+Run these commands in R:
+
+```r
+install.packages(c(
+  "BiocManager", "Matrix", "tidyr", "data.table", "assertthat", "digest",
+  "dplyr", "igraph", "irlba", "leidenbase", "pbapply", "proxy", "RANN",
+  "RcppAnnoy", "RcppHNSW", "RhpcBLASctl", "uwot", "openssl", "plyr", "future"
+))
+BiocManager::install("SingleCellExperiment", ask = FALSE, update = FALSE)
+source("r_pipeline/trajectory_core/runtime.R")
+```
+
+The runtime checks its required packages on each job. Linux source installations may additionally require C/C++/Fortran compilers and system development libraries; follow the failing package's installation diagnostics. The web M1–M4 path uses the bundled `trajectory_core` and a base-R CLR implementation. The separate original `TreeMM/R/run_pipeline.R` still calls `SpiecEasi`; its dependencies should be assessed separately if running that entry point directly.
+
+Python sets `MMSAGE_JOB_DIR`, `MMSAGE_OUTPUT_DIR`, root threshold, target filter and trajectory configuration for each R child process. For manual execution, explicitly set the job/output directories and stage the reference tables first; the scripts no longer use a hard-coded data root. Optional deployment controls include `MMSAGE_MIN_METABOLITE_MEAN` (default 0.0026) and `MMSAGE_WORKERS` (web default 1).
+
+### Linux deployment and upload smoke test
+
+From `/srv/mmsage`, install the Python requirements in the service's virtual environment and validate the R runtime:
+
+```bash
+cd /srv/mmsage
+venv/bin/python -m pip install -r requirements.txt
+Rscript -e 'source("r_pipeline/trajectory_core/runtime.R")'
+# Foreground launch for a new installation; avoid starting a second server on the same port.
+venv/bin/python -m uvicorn backend.api_server:app --host 127.0.0.1 --port 8000
+```
+
+On the existing systemd deployment, use `systemctl restart mmsage.service` after replacing Python code, and verify with `systemctl is-active mmsage.service`. Keep the working directory at `/srv/mmsage`, preserve write access to `data/jobs/`, and retain the existing reverse proxy for public access. Do not restart while jobs are running: background jobs are threads inside the service process.
+
+```bash
+curl -sS -F 'microbes=@TreeMM/Example/input/microbes.tsv' \
+  -F 'metabolites=@TreeMM/Example/input/metabolites.tsv' \
+  'http://127.0.0.1:8000/api/correlation/jobs?microbe_filter=Cyanobacteria&top_n=50&p_threshold=0.05&num_dim=20&neighbors=3&min_dist=0.5&metric=cosine&cluster_res=0.1'
+# Replace <job_id> with the returned identifier and poll until terminal status.
+curl 'http://127.0.0.1:8000/api/correlation/jobs/<job_id>'
+# After completion:
+curl -f 'http://127.0.0.1:8000/api/correlation/jobs/<job_id>/download' -o trajectory_results.zip
+curl -f 'http://127.0.0.1:8000/api/correlation/jobs/<job_id>/ranking' -o correlation_ranking.csv
+```
+
+Validate ZIP contents and `M4_summary.log` as well as HTTP status. The abundance/trajectory workflow does not require an LLM API key.
 
 ## Packaged results
 
@@ -136,7 +213,7 @@ python backend/api_server.py --port 8000
 Open these local pages after the server starts:
 
 - `http://localhost:8000/` for the main dashboard.
-- `http://localhost:8000/pipeline` for CSV upload and pipeline execution.
+- `http://localhost:8000/pipeline` for abundance CSV/TSV upload and M1–M4 execution.
 - `http://localhost:8000/evidence` for multi-agent evidence review.
 - `http://localhost:8000/graph` for knowledge-graph exploration.
 - `http://localhost:8000/docs` for FastAPI-generated API documentation.
@@ -246,6 +323,10 @@ Common backend endpoints:
 
 | Method | Endpoint | Description |
 |---|---|---|
+| `POST` | `/api/correlation/jobs` | Upload multipart `microbes` and `metabolites` files; start M1–M4 with query parameters |
+| `GET` | `/api/correlation/jobs/{job_id}` | Read job status, progress, output counts and download path |
+| `GET` | `/api/correlation/jobs/{job_id}/ranking` | Download the correlation ranking CSV |
+| `GET` | `/api/correlation/jobs/{job_id}/download` | Download the result ZIP after completion |
 | `POST` | `/api/pipeline/run` | Start the pipeline in a background thread |
 | `GET` | `/api/pipeline/status` | Get current pipeline status |
 | `GET` | `/api/step1/candidates` | Get Step 1 candidates |
