@@ -95,7 +95,7 @@ def run_step3(
             with open(p, 'r', encoding='utf-8') as f:
                 for c in json.load(f):
                     key = (c.get('bacteria', ''), c.get('metabolite', ''))
-                    step1_lookup[key] = c.get('mmsage_norm', 0)
+                    step1_lookup[key] = c.get('mmsage_norm', c.get('trajmm_norm', 0))
             print(f"  Loaded {len(step1_lookup)} mmsage_norm values from step1")
 
     # Resolve mmsage_norm: prefer step1 latest, fallback to step2 embedded
@@ -108,7 +108,8 @@ def run_step3(
 
     # Compute adaptive thresholds using median of each axis
     mmsage_values = sorted(
-        item.get('candidate', {}).get('mmsage_norm', 0)
+        item.get('candidate', {}).get('mmsage_norm',
+               item.get('candidate', {}).get('trajmm_norm', 0))
         for item in novelty_results)
     novelty_values = sorted(item.get('chain_novelty', 1.0)
                             for item in novelty_results)
@@ -132,7 +133,7 @@ def run_step3(
 
     for item in novelty_results:
         cand = item.get('candidate', {})
-        mmsage_norm = cand.get('mmsage_norm', 0)
+        mmsage_norm = cand.get('mmsage_norm', cand.get('trajmm_norm', 0))
         chain_novelty = item.get('chain_novelty', 1.0)
         chain_count = item.get('chain_count', 0)
         pairwise = item.get('pairwise_counts', {})

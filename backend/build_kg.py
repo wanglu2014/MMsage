@@ -173,7 +173,7 @@ def _get_pool(keys_csv: Path = DEFAULT_KEYS_CSV) -> DeepSeekPool:
 
 
 # ================================================================
-# SapBERT aliases for post-retrieval entity recognition (cached)
+# SapBERT Synonym Expansion (cached)
 # ================================================================
 
 _synonym_cache: Dict[str, List[str]] = {}
@@ -204,7 +204,7 @@ def get_sapbert_synonyms(
     entity_name: str, entity_type: str = None,
     top_k: int = 5, threshold: float = 0.75,
 ) -> List[str]:
-    """Get aliases for post-retrieval entity recognition. Cached."""
+    """Get synonyms via SapBERT. Cached."""
     _load_synonym_cache()
     cache_key = f"{entity_name}|{entity_type or 'any'}"
     if cache_key in _synonym_cache:
@@ -232,7 +232,7 @@ def get_sapbert_synonyms(
 def expand_entity_names(
     bacteria_set: Set[str], metabolite_set: Set[str], disease: str,
 ) -> Tuple[Dict[str, str], Dict[str, str], List[str]]:
-    """Build aliases for abstract recognition, not PubMed query expansion."""
+    """Expand entity dictionaries with SapBERT synonyms."""
     bacteria_names: Dict[str, str] = {}
     for bact in bacteria_set:
         for s in get_sapbert_synonyms(bact, entity_type="microbe"):
@@ -671,8 +671,8 @@ def run_build_kg_direct(
 
     pool = DeepSeekPool(Path(keys_csv))
 
-    # Phase 1: prepare aliases used only after articles have been fetched.
-    print("\nPhase 1: Preparing entity aliases for abstract recognition...")
+    # Phase 1: expand names
+    print("\nPhase 1: SapBERT synonym expansion...")
     bacteria_set = {species.replace(" ", "_")}
     metabolite_set: Set[str] = set()
     bacteria_names, metabolite_names, disease_terms = expand_entity_names(
@@ -682,9 +682,9 @@ def run_build_kg_direct(
     print("\nPhase 2: Generating PubMed queries...")
 
     def _build_term(name: str, etype: str = None) -> str:
-        del etype  # Retained in the local signature for call-site compatibility.
-        normalized = name.replace("_", " ").strip()
-        return f'"{normalized}"'
+        syns = get_sapbert_synonyms(name, entity_type=etype)
+        quoted = [f'"{s}"' for s in syns[:3]]
+        return f"({' OR '.join(quoted)})" if len(quoted) > 1 else quoted[0]
 
     sp_term = _build_term(species, "microbe")
     dis_term = _build_term(disease, "disease")
@@ -734,7 +734,7 @@ def run_build_kg_direct(
         disease_terms, disease, pool)
 
     # ---------------------------------------------------------
-    # Merge disease aliases into the canonical disease node in direct mode.
+    # 【一劳永逸的终极修复】：动态疾病同义词合并引擎 (Direct 模式)
     # ---------------------------------------------------------
     disease_id = _make_node_id(disease)
     if disease_id not in G:
@@ -775,13 +775,13 @@ def generate_search_queries(
 ) -> List[Dict[str, str]]:
     queries: List[Dict[str, str]] = []
     seen: Set[str] = set()
-    bacteria_set = set(c["bacteria"] for c in candidates)
+    bacteria_set = sorted(set(c["bacteria"] for c in candidates))
     metabolite_set = set(c["metabolite"] for c in candidates)
 
     def _bt(name, etype=None):
-        del etype  # Retained in the local signature for call-site compatibility.
-        normalized = name.replace("_", " ").strip()
-        return f'"{normalized}"'
+        syns = get_sapbert_synonyms(name, entity_type=etype)
+        q = [f'"{s}"' for s in syns[:3]]
+        return f"({' OR '.join(q)})" if len(q) > 1 else q[0]
 
     dt = _bt(disease, "disease")
     ef = EXPERIMENTAL_FILTER if experimental_only else ""
@@ -852,7 +852,7 @@ def run_build_kg(
     bacteria_set = set(c["bacteria"] for c in candidates)
     metabolite_set = set(c["metabolite"] for c in candidates)
 
-    print("\nPhase 1: Preparing entity aliases for abstract recognition...")
+    print("\nPhase 1: SapBERT synonym expansion...")
     bacteria_names, metabolite_names, disease_terms = expand_entity_names(
         bacteria_set, metabolite_set, disease)
 
@@ -882,34 +882,36 @@ def run_build_kg(
         disease_terms, disease, pool)
 
     # ---------------------------------------------------------
-    # Merge disease aliases into the canonical disease node.
+    # 【一劳永逸的终极修复】：动态疾病同义词合并引擎
+    # 不管用户输入什么缩写，自动吸收 LLM 产生的所有全拼替身！
     # ---------------------------------------------------------
     did = _make_node_id(disease)
     if did not in G:
         G.add_node(did, label=disease, type="disease", node_type="disease")
 
-    # Normalize SapBERT aliases to graph node IDs.
+    # 1. 动态获取 SapBERT 找到的所有同义词（包含全拼、别名等）
+    # 转换为小写下划线的 ID 格式 (例如: colorectal_cancer)
     synonym_ids = set([_make_node_id(dt) for dt in disease_terms])
     
-    # Identify alias nodes already present in the graph.
+    # 2. 遍历全图，揪出所有潜伏的“替身节点”
     rogues_to_merge = [node for node in list(G.nodes()) if node in synonym_ids and node != did]
 
-    # Transfer alias edges to the canonical disease node.
+    # 3. 剥夺替身的所有连线，并赋予给正牌大哥 (did)
     for rogue in rogues_to_merge:
-        # Transfer outgoing edges.
+        # 转移它发出的连线 (rogue -> target)
         for src, tgt, data in list(G.out_edges(rogue, data=True)):
-            if tgt != did: # Avoid self-loops.
+            if tgt != did: # 防止自己连自己
                 G.add_edge(did, tgt, **data)
         
-        # Transfer incoming edges.
+        # 转移连向它的连线 (source -> rogue)
         for src, tgt, data in list(G.in_edges(rogue, data=True)):
             if src != did:
                 G.add_edge(src, did, **data)
                 
-        # Remove the merged alias node.
+        # 彻底删除被榨干的替身节点
         G.remove_node(rogue)
 
-    # Normalize the canonical disease node attributes.
+    # 统一正牌大哥的着装（补全属性，防止前端报错）
     G.nodes[did]['label'] = disease
     G.nodes[did]['type'] = 'disease'
     G.nodes[did]['node_type'] = 'disease'

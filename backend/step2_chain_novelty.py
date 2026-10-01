@@ -27,16 +27,82 @@ try:
 except ImportError:
     HAS_ENTREZ = False
 
+try:
+    from db_checkers import sapbert_retriever
+    HAS_SAPBERT = True
+except ImportError:
+    HAS_SAPBERT = False
+
 # ---- Configuration ----
 
 ENTREZ_EMAIL = os.getenv("ENTREZ_EMAIL", "").strip() or "entrez-not-configured@invalid"
 ENTREZ_API_KEY = None
 CACHE_DIR = Path(__file__).parent.parent / "cache"
 CACHE_FILE = CACHE_DIR / "pubmed_cache.json"
+SAPBERT_SYN_CACHE_FILE = CACHE_DIR / "sapbert_step2_synonyms.json"
 DEFAULT_DISEASE = "IBD"
 QUERY_DELAY_S = 0.35
 
 EXPERIMENTAL_FILTER = ' AND ("in vivo" OR "in vitro" OR "mouse" OR "mice" OR "cell line" OR "experiment" OR "clinical trial")'
+
+
+# ---- SapBERT-driven synonym expansion (replaces hardcoded DEFAULT_SYNONYMS) ----
+
+_sapbert_syn_cache: Dict[str, List[str]] = {}
+_sapbert_syn_cache_loaded = False
+
+
+def _load_sapbert_syn_cache():
+    global _sapbert_syn_cache, _sapbert_syn_cache_loaded
+    if _sapbert_syn_cache_loaded:
+        return
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    if SAPBERT_SYN_CACHE_FILE.exists():
+        try:
+            with open(SAPBERT_SYN_CACHE_FILE, "r", encoding="utf-8") as f:
+                _sapbert_syn_cache = json.load(f)
+        except Exception:
+            _sapbert_syn_cache = {}
+    _sapbert_syn_cache_loaded = True
+
+
+def _save_sapbert_syn_cache():
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    with open(SAPBERT_SYN_CACHE_FILE, "w", encoding="utf-8") as f:
+        json.dump(_sapbert_syn_cache, f, indent=2, ensure_ascii=False)
+
+
+def _sapbert_synonyms(entity_name: str, entity_type: str = None) -> List[str]:
+    """
+    Get synonyms using SapBERT semantic retrieval from the pre-built index.
+    Falls back to [entity_name] when SapBERT is unavailable.
+    Results are cached locally to avoid repeated model calls.
+    """
+    _load_sapbert_syn_cache()
+    cache_key = f"{entity_name}|{entity_type or 'any'}"
+    if cache_key in _sapbert_syn_cache:
+        return _sapbert_syn_cache[cache_key]
+
+    syns = [entity_name.replace("_", " ")]
+    if HAS_SAPBERT:
+        try:
+            hits = sapbert_retriever.retrieve(
+                entity_name.replace("_", " "),
+                entity_type=entity_type,
+                top_k=5,
+                threshold=0.75,
+                exact_first=True,
+            )
+            for name, _score in hits:
+                clean = name.strip()
+                if clean and clean.lower() not in {s.lower() for s in syns}:
+                    syns.append(clean)
+        except Exception:
+            pass
+
+    _sapbert_syn_cache[cache_key] = syns
+    _save_sapbert_syn_cache()
+    return syns
 
 
 # ---- Data classes ----
@@ -106,18 +172,51 @@ def _cache_key(query: str) -> str:
 
 def build_pubmed_query(terms: List[str], synonym_map: Dict[str, List[str]] = None) -> str:
     """
-    Build an AND-joined PubMed query without expanding input terms.
+    Build PubMed query from a list of entity names.
 
-    ``synonym_map`` remains in the signature for backward compatibility but
-    is intentionally ignored. Underscores are converted to spaces so entity
-    IDs such as ``Akkermansia_muciniphila`` remain valid search phrases.
+    Each term is expanded to its synonyms (OR-joined) via SapBERT,
+    then all groups are AND-joined.  The optional synonym_map provides
+    additional overrides but is no longer the primary source.
+
+    Example:
+        terms = ["Akkermansia_muciniphila", "isobutyric acid", "IBD"]
+        ->  ("Akkermansia muciniphila" OR "Akkermansia") AND
+            ("isobutyric acid" OR "isobutyrate") AND
+            ("IBD" OR "inflammatory bowel disease")
     """
-    normalized_terms = [
-        str(term).replace("_", " ").strip()
-        for term in terms
-        if str(term).strip()
-    ]
-    return " AND ".join(f'"{term}"' for term in normalized_terms)
+    if synonym_map is None:
+        synonym_map = {}
+
+    groups = []
+    for term in terms:
+        # Priority 1: explicit synonym_map override
+        synonyms = synonym_map.get(term)
+        if not synonyms:
+            term_lower = term.lower().strip()
+            for key, vals in synonym_map.items():
+                if key.lower().replace('_', ' ') == term_lower.replace('_', ' '):
+                    synonyms = vals
+                    break
+
+        # Priority 2: SapBERT dynamic synonym expansion
+        if not synonyms:
+            entity_type = None
+            tl = term.lower().replace("_", " ")
+            # Generic disease detection: common suffixes/keywords across diseases
+            _disease_hints = ("disease", "syndrome", "disorder", "itis",
+                              "osis", "emia", "uria", "pathy", "cancer",
+                              "tumor", "carcinoma", "lymphoma", "leukemia")
+            if any(kw in tl for kw in _disease_hints):
+                entity_type = "disease"
+            synonyms = _sapbert_synonyms(term, entity_type=entity_type)
+
+        or_parts = [f'"{s}"' for s in synonyms[:4]]
+        if len(or_parts) == 1:
+            groups.append(or_parts[0])
+        else:
+            groups.append(f"({' OR '.join(or_parts)})")
+
+    return " AND ".join(groups)
 
 
 def query_pubmed_count(
@@ -266,7 +365,7 @@ def find_best_chain(
     Strategy:
     1. Find KG paths between bacteria and metabolite
     2. Query PubMed for multiple combinations (pair, triple, full-chain)
-    3. Use the experimental bacteria-metabolite-disease count as chain_count
+    3. chain_count = max of all relevant queries
 
     Returns:
         Dict with 'chain_path', 'chain_count', 'chain_query', 'all_paths',
@@ -375,7 +474,7 @@ def compute_edge_counts(
     Args:
         path_tuples: List of (source, relation, target) from KG
         kg: KnowledgePump instance
-        synonym_map: Deprecated compatibility mapping; ignored by query builder
+        synonym_map: PubMed synonym expansions
         bacteria_orig: Original bacteria name for proper term conversion
         metabolite_orig: Original metabolite name for proper term conversion
 
@@ -432,7 +531,7 @@ def run_step2(
         output_path: Path to save step2 output JSON
         disease: Disease context for PubMed queries (default: IBD)
         max_depth: Max KG path depth
-        synonym_map_path: Deprecated compatibility option; ignored
+        synonym_map_path: Optional path to synonym_map.json
 
     Returns:
         List of ChainNoveltyResult dicts
@@ -447,9 +546,17 @@ def run_step2(
 
     kg = KnowledgePump(gml_path)
 
+    # Load synonym map (optional overrides; SapBERT provides dynamic synonyms)
     synonym_map: Dict[str, List[str]] = {}
     if synonym_map_path:
-        print("  [WARN] --synonym-map is deprecated and ignored; input terms are not expanded")
+        try:
+            with open(synonym_map_path, 'r', encoding='utf-8') as f:
+                custom_synonyms = json.load(f)
+            synonym_map.update(custom_synonyms)
+            print(f"Loaded custom synonyms: {len(custom_synonyms)} entries")
+        except Exception as e:
+            print(f"  [WARN] Could not load synonym map: {e}")
+    print(f"  SapBERT synonym expansion: {'enabled' if HAS_SAPBERT else 'disabled'}")
 
     if not HAS_ENTREZ:
         raise RuntimeError(
@@ -544,7 +651,7 @@ if __name__ == '__main__':
     parser.add_argument('--disease', default='IBD')
     parser.add_argument('--max-depth', type=int, default=3)
     parser.add_argument('--synonym-map', default=None,
-                        help='Deprecated compatibility option; ignored')
+                        help='Path to custom synonym_map.json')
     args = parser.parse_args()
 
     run_step2(

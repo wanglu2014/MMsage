@@ -15,18 +15,6 @@ import pandas as pd
 import numpy as np
 
 
-PROJECT_DIR = Path(__file__).resolve().parent.parent
-
-
-def portable_source_path(filepath: str | Path) -> str:
-    """Use a project-relative source reference when the input is packaged locally."""
-    source = Path(filepath)
-    try:
-        return source.resolve().relative_to(PROJECT_DIR).as_posix()
-    except ValueError:
-        return source.as_posix()
-
-
 def extract_bacteria_from_filename(filename: str) -> Optional[str]:
     """
     Extract bacteria name from coordinates filename.
@@ -86,7 +74,6 @@ def process_single_file(
         raise FileNotFoundError(f"File not found: {filepath}")
 
     fname = fpath.name
-    source_file = portable_source_path(fpath)
     bacteria = extract_bacteria_from_filename(fname)
     if not bacteria:
         raise ValueError(f"Cannot extract bacteria name from filename: {fname}")
@@ -129,7 +116,7 @@ def process_single_file(
             'metabolite': metabolite,
             'pseudotime': float(pseudotime),
             'max_pseudotime': float(max_pt),
-            'source_file': source_file,
+            'source_file': filepath,
         })
 
     print(f"Total raw pairs: {len(all_candidates)}")
@@ -152,7 +139,7 @@ def process_single_file(
         group['total_in_microbe'] = n
         return group
 
-    # Apply directly for one file to avoid Pandas 2.0+ groupby index loss.
+    # 【修复】对于单文件处理，直接应用函数，避免触发 Pandas 2.0+ 的 groupby 索引丢失 Bug
     df_all = _rank_dual_end(df_all)
     if 'bacteria' not in df_all.columns:
         df_all = df_all.reset_index()
@@ -212,7 +199,6 @@ def process_coordinates_dir(
 
     for i, filepath in enumerate(files):
         fname = Path(filepath).name
-        source_file = portable_source_path(filepath)
         bacteria = extract_bacteria_from_filename(fname)
         if not bacteria:
             continue
@@ -257,7 +243,7 @@ def process_coordinates_dir(
                 'metabolite': metabolite,
                 'pseudotime': float(pseudotime),
                 'max_pseudotime': float(max_pt),
-                'source_file': source_file,
+                'source_file': filepath,
             })
 
         if (i + 1) % 500 == 0:
@@ -285,7 +271,7 @@ def process_coordinates_dir(
         return group
 
     df_all = df_all.groupby('bacteria', group_keys=False).apply(_rank_dual_end)
-    # Restore bacteria from the index after grouped processing if needed.
+    # 【修复】防止批量处理时 Pandas 将 bacteria 吞并到 Index 中
     if 'bacteria' not in df_all.columns:
         df_all = df_all.reset_index()
 

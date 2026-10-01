@@ -24,6 +24,7 @@ ARCHIVE_FILES = [
     "step2_chain_novelty.json",
     "step2b_agent_evidence.json",
     "step3_quadrant.json",
+    "step4_final.json",
     "pipeline_status.json",
     "knowledge_graph.gml",
 ]
@@ -32,14 +33,6 @@ ARCHIVE_FILES = [
 def _slug(text: str, max_len: int = 24) -> str:
     s = re.sub(r"[^\w]+", "_", (text or "run").strip()).strip("_")
     return (s[:max_len] if s else "run").lower()
-
-
-def _portable_source_path(path: str | Path) -> str:
-    source = Path(path)
-    try:
-        return source.resolve().relative_to(PROJECT_DIR.resolve()).as_posix()
-    except ValueError:
-        return source.as_posix()
 
 
 def _load_json(path: Path) -> Any:
@@ -171,7 +164,7 @@ def archive_run(
 
     coord_name = ""
     if coordinates_file:
-        coord_name = _portable_source_path(coordinates_file)
+        coord_name = Path(coordinates_file).name
 
     meta = {
         "run_id": rid,
@@ -333,6 +326,7 @@ def build_record_export(run_id: str, bacteria: str, metabolite: str) -> Optional
         "step2_chain_novelty": _find_in_list(_load_json(run_dir / "step2_chain_novelty.json"), bacteria, metabolite),
         "step2b_agent_evidence": _find_in_list(_load_json(run_dir / "step2b_agent_evidence.json"), bacteria, metabolite),
         "step3_quadrant": step3_row or _find_in_list(_load_json(run_dir / "candidates.json"), bacteria, metabolite),
+        "step4_final": _find_in_list(_load_json(run_dir / "step4_final.json"), bacteria, metabolite),
     }
 
     merged = get_record(run_id, bacteria, metabolite)
@@ -357,6 +351,7 @@ def build_record_export(run_id: str, bacteria: str, metabolite: str) -> Optional
                     "step2_chain_novelty",
                     "step2b_agent_evidence",
                     "candidates",
+                    "step4_final",
                     "pipeline_status",
                     "meta",
                 ]

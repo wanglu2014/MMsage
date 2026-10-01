@@ -1,4 +1,4 @@
-"""Build KG with an exact Akkermansia + IBD query and experiment filters."""
+"""Build KG with precise single query: Akk + IBD full synonyms + experimental."""
 import sys, io, time
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace', line_buffering=True)
 sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace', line_buffering=True)
@@ -15,7 +15,11 @@ import networkx as nx
 
 QUERY = (
     '"Akkermansia muciniphila"'
-    ' AND "IBD"'
+    ' AND ("IBD" OR "inflammatory bowel disease"'
+    ' OR "ulcerative colitis" OR "Crohn\'s disease" OR "Crohn disease"'
+    ' OR "colitis" OR "enteritis" OR "ileitis"'
+    ' OR "intestinal inflammation" OR "gut inflammation"'
+    ' OR "mucosal inflammation")'
     ' AND ("in vivo" OR "in vitro" OR "cell line" OR "clinical trial"'
     ' OR "experiment" OR "mouse" OR "mice" OR "rat" OR "rats"'
     ' OR "murine" OR "animal model" OR "patient" OR "patients"'
@@ -27,14 +31,14 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 OUTPUT = str(PROJECT_ROOT / "data" / "knowledge_graph" / "auto_built_kg.gml")
 
 print("=" * 65)
-print("  BUILD KG: Exact Akkermansia + IBD query with experiment filters")
+print("  BUILD KG: Precise query (Akk + IBD synonyms + experimental)")
 print("=" * 65)
 print(f"  Query: {QUERY[:120]}...")
 
 pool = DeepSeekPool(Path(str(DEFAULT_KEYS_CSV)))
 
-# Phase 1: aliases used only for post-retrieval entity recognition.
-print("\nPhase 1: Preparing entity aliases for abstract recognition...")
+# Phase 1: synonym expansion
+print("\nPhase 1: SapBERT synonym expansion...")
 bacteria_set: Set[str] = {"Akkermansia_muciniphila"}
 metabolite_set: Set[str] = set()
 disease = "IBD"

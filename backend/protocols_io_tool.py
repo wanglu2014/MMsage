@@ -68,7 +68,7 @@ def _request_json(path: str, token: str, params: Dict[str, Any] | None = None) -
         headers={
             "Authorization": f"Bearer {token}",
             "Accept": "application/json",
-            "User-Agent": "MMSage-Step3/1.0",
+            "User-Agent": "TrajMM-Step3/1.0",
         },
     )
     with urlopen(request, timeout=REQUEST_TIMEOUT) as response:

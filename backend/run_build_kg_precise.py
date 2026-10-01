@@ -1,11 +1,13 @@
 """
-Build a KG with a precise PubMed query and OpenAlex enrichment.
+Build KG: precise single query + OpenAlex enrichment
+=====================================================
+Step 1: PubMed 精确查询 Akk+IBD+实验 文献
+Step 2: DeepSeek LLM 提取三元组 (已缓存的自动跳过)
+Step 3: OpenAlex 增强 edge_impact_factor / edge_citation_count / publication_year
+Step 4: 保存到项目 data/knowledge_graph/auto_built_kg.gml
 
-Query experimental Akkermansia and IBD literature, extract triples with
-DeepSeek while reusing PMID caches, enrich edge metrics with OpenAlex, and
-save the graph to data/knowledge_graph/auto_built_kg.gml.
-
-Run from the backend directory with: python run_build_kg_precise.py
+运行方式 (在本仓库 backend 目录下):
+  python run_build_kg_precise.py
 """
 import os
 import sys
@@ -36,7 +38,11 @@ from build_kg import (
 
 QUERY = (
     '"Akkermansia muciniphila"'
-    ' AND "IBD"'
+    ' AND ("IBD" OR "inflammatory bowel disease"'
+    " OR \"ulcerative colitis\" OR \"Crohn's disease\" OR \"Crohn disease\""
+    ' OR "colitis" OR "enteritis" OR "ileitis"'
+    ' OR "intestinal inflammation" OR "gut inflammation"'
+    ' OR "mucosal inflammation")'
     ' AND ("in vivo" OR "in vitro" OR "cell line" OR "clinical trial"'
     ' OR "experiment" OR "mouse" OR "mice" OR "rat" OR "rats"'
     ' OR "murine" OR "animal model" OR "patient" OR "patients"'
@@ -63,7 +69,7 @@ def build_kg_step():
 
     pool = DeepSeekPool(Path(str(DEFAULT_KEYS_CSV)))
 
-    print("\nPhase 1: Preparing entity aliases for abstract recognition...")
+    print("\nPhase 1: Entity expansion...")
     bacteria_set: Set[str] = {"Akkermansia_muciniphila"}
     metabolite_set: Set[str] = set()
     disease = "IBD"
@@ -105,7 +111,7 @@ def build_kg_step():
 # ================================================================
 # Step 3: OpenAlex enrichment
 # (adapted from rep1221_clin/add_metrics_to_gml.py,
-#  using edge_ prefixes and adding publication_year)
+#  属性名改为 edge_ 前缀, 补 publication_year)
 # ================================================================
 
 class OpenAlexEnricher:

@@ -52,6 +52,7 @@ from runtime_state import (
     save_app_state,
     save_json as save_runtime_json,
 )
+from correlation_job_runner import run_correlation_job
 
 app = FastAPI(title="MMSage x Chain Novelty Dual-Axis System", version="2.0.0")
 
@@ -83,6 +84,62 @@ class PipelineConfig(BaseModel):
     disease: str = "IBD"
     max_depth: int = 3
     bacteria_filter: Optional[str] = None
+
+
+def _safe_upload_name(filename: str) -> str:
+    name = re.sub(r"[^\w\-. ]", "_", Path(filename or "upload").name)
+    if not name.lower().endswith((".csv", ".tsv", ".txt")):
+        raise HTTPException(status_code=400, detail="Only CSV, TSV, or TXT files are supported")
+    return name
+
+
+@app.post("/api/correlation/jobs")
+async def create_correlation_job(microbes: UploadFile = File(...), metabolites: UploadFile = File(...), microbe_filter: str | None = Query(default=None), top_n: int = Query(default=50, ge=1, le=10000), p_threshold: float = Query(default=1.0, ge=0, le=1), num_dim: int = Query(default=20, ge=2), neighbors: int = Query(default=3, ge=2), min_dist: float = Query(default=0.5, ge=0, le=1), metric: str = Query(default="cosine"), cluster_res: float = Query(default=0.1, ge=0)):
+    """Run M1–M4; derive taxonomy and Spearman statistics from the two matrices."""
+    job_id = f"corr_{uuid4().hex[:12]}"
+    inputs = job_inputs_dir(job_id)
+    inputs.mkdir(parents=True, exist_ok=True)
+    microbe_path = inputs / ("microbes" + Path(_safe_upload_name(microbes.filename or "microbes.tsv")).suffix)
+    metabolite_path = inputs / ("metabolites" + Path(_safe_upload_name(metabolites.filename or "metabolites.tsv")).suffix)
+    microbe_path.write_bytes(await microbes.read())
+    metabolite_path.write_bytes(await metabolites.read())
+    save_runtime_json(job_status_path(job_id), {"job_id": job_id, "status": "queued", "progress": "Queued"})
+    configuration = {"num_dim": num_dim, "neighbors": neighbors, "min_dist": min_dist, "metric": metric, "cluster_res": cluster_res}
+    threading.Thread(target=run_correlation_job, args=(job_id, str(microbe_path), str(metabolite_path), None, None, None, microbe_filter, p_threshold, top_n, configuration), daemon=True).start()
+    return {"job_id": job_id, "status": "queued"}
+
+
+@app.get("/api/correlation/jobs/{job_id}")
+async def correlation_job_status(job_id: str):
+    if not re.fullmatch(r"corr_[0-9a-f]{12}", job_id):
+        raise HTTPException(status_code=404, detail="Correlation job not found")
+    status = load_runtime_json(job_status_path(job_id))
+    if not isinstance(status, dict):
+        raise HTTPException(status_code=404, detail="Correlation job not found")
+    return status
+
+
+@app.get("/api/correlation/jobs/{job_id}/download")
+async def download_correlation_result(job_id: str):
+    if not re.fullmatch(r"corr_[0-9a-f]{12}", job_id):
+        raise HTTPException(status_code=404, detail="Correlation job not found")
+    status = load_runtime_json(job_status_path(job_id)) or {}
+    if status.get("status") != "completed":
+        raise HTTPException(status_code=409, detail="Result is not ready")
+    path = job_output_dir(job_id) / "trajectory_results.zip"
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Correlation result is not ready")
+    return FileResponse(path, media_type="application/zip", filename="trajectory_results.zip")
+
+
+@app.get("/api/correlation/jobs/{job_id}/ranking")
+async def download_correlation_ranking(job_id: str):
+    if not re.fullmatch(r"corr_[0-9a-f]{12}", job_id):
+        raise HTTPException(status_code=404, detail="Correlation job not found")
+    path = job_output_dir(job_id) / "correlation_ranking.csv"
+    if not path.exists():
+        raise HTTPException(status_code=409, detail="Ranking result is not ready")
+    return FileResponse(path, media_type="text/csv", filename="correlation_ranking.csv")
 
 
 class KGRequest(BaseModel):
@@ -1504,6 +1561,18 @@ async def serve_index():
     if index_path.exists():
         return HTMLResponse(index_path.read_text(encoding='utf-8'))
     return HTMLResponse("<h1>MMSage x Chain Novelty API</h1><p>Frontend not found. API available at /docs</p>")
+
+
+@app.get("/api/example-input/{filename}")
+async def serve_example_input(filename: str):
+    """Serve the bundled example abundance matrix for the demo pipeline page."""
+    allowed = {"microbes.tsv": "microbes.tsv", "metabolites.tsv": "metabolites.tsv"}
+    if filename not in allowed:
+        raise HTTPException(status_code=404, detail="Example input not found")
+    path = PROJECT_DIR / "TreeMM" / "Example" / "input" / allowed[filename]
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Example input not found")
+    return FileResponse(path, media_type="text/tab-separated-values", filename=filename)
 
 
 @app.get("/pipeline", response_class=HTMLResponse)

@@ -1,0 +1,203 @@
+
+======================================================================
+  TrajMM x Chain Novelty DUAL-AXIS PIPELINE
+======================================================================
+
+Coordinates: E:\Onedrive\Apps\Research\TrajMM_nov\data\sample_coordinates\pluscombno1V0317_min0_Akkermansia_muciniphila_seed_1_dim_10_neighbor_2_dist_0.4_metric_euclidean_rank_rootknow_cor0303_1_top_50_Pthre_0.1_pair.csv_clu_1_coordinates_tunek.csv
+Knowledge Graph: E:\Onedrive\Apps\Research\TrajMM_nov\data\knowledge_graph\auto_built_kg.gml
+Disease context: IBD
+Output: E:\Onedrive\Apps\Research\TrajMM_nov\outputs
+Top-N: 200, Max-Depth: 3
+
+============================================================
+  STEP 1: TrajMM Signal Processing
+============================================================
+Processing single file: pluscombno1V0317_min0_Akkermansia_muciniphila_seed_1_dim_10_neighbor_2_dist_0.4_metric_euclidean_rank_rootknow_cor0303_1_top_50_Pthre_0.1_pair.csv_clu_1_coordinates_tunek.csv
+Bacteria: Akkermansia_muciniphila
+Total raw pairs: 146
+E:\Onedrive\Apps\Research\TrajMM_nov\backend\.\step1_trajmm_signal.py:142: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.
+  df_all = df_all.groupby('bacteria', group_keys=False).apply(_rank_dual_end)
+Returning top 146 candidates
+Saved 146 candidates to E:\Onedrive\Apps\Research\TrajMM_nov\outputs\step1_candidates.json
+============================================================
+  STEP 2: Chain Novelty Scoring
+============================================================
+Loaded knowledge graph: 1320 nodes, 2130 edges
+  SapBERT synonym expansion: enabled
+
+Phase 1: Finding KG paths and chain co-occurrence for 146 candidates...
+Loaded PubMed cache: 3715 entries
+  Processed 50/146 candidates (5 with KG paths)
+  Processed 100/146 candidates (6 with KG paths)
+
+Phase 2: Normalizing Chain Novelty...
+  C_max = 30 (max chain co-occurrence across all candidates)
+
+Results:
+  7/146 candidates have KG paths
+  109/146 candidates have chain_count=0 (dark matter)
+  Chain Novelty range: 0.0000 - 1.0000
+Saved 146 scored candidates to E:\Onedrive\Apps\Research\TrajMM_nov\outputs\step2_chain_novelty.json
+[SapBERT] Loaded index: 253048 entities, types: {'microbe': 18424, 'metabolite': 227080, 'disease': 7544}
+[BindedDB] Loaded 418129 records
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+[BindedDB] SapBERT fallback failed: No module named 'torch'
+============================================================
+  STEP 3: Dual-Axis Quadrant Assignment
+============================================================
+
+Adaptive thresholds (median):
+  TrajMM: 0.5034  (range: 0.0068 - 1.0000)
+  Chain Novelty: 1.0000  (range: 0.0000 - 1.0000)
+
+Quadrant distribution:
+  I (Dark Matter): 55 ★
+  II (Novel but Weak Signal): 54
+  III (Known Relationship): 18
+  IV (Low Priority): 19
+
+Dark matter candidates (Quadrant I, 55):
+  Akkermansia_muciniphila x LysoPE(15:0/0:0) (TrajMM=1.000, chain_count=0, ChainNov=1.000)
+  Akkermansia_muciniphila x Isobutyric acid (TrajMM=0.986, chain_count=0, ChainNov=1.000)
+  Akkermansia_muciniphila x Thiamine (TrajMM=0.980, chain_count=0, ChainNov=1.000)
+  Akkermansia_muciniphila x Tetracosahexaenoic acid (TrajMM=0.973, chain_count=0, ChainNov=1.000)
+  Akkermansia_muciniphila x PC(22:1(13Z)/15:0) (TrajMM=0.959, chain_count=0, ChainNov=1.000)
+  Akkermansia_muciniphila x Thymidine (TrajMM=0.945, chain_count=0, ChainNov=1.000)
+  Akkermansia_muciniphila x PC(22:1(13Z)/14:0) (TrajMM=0.931, chain_count=0, ChainNov=1.000)
+  Akkermansia_muciniphila x Sphingosine (TrajMM=0.925, chain_count=0, ChainNov=1.000)
+  Akkermansia_muciniphila x L-Methionine (TrajMM=0.918, chain_count=0, ChainNov=1.000)
+  Akkermansia_muciniphila x Norvaline (TrajMM=0.911, chain_count=0, ChainNov=1.000)
+  ... and 45 more
+
+Known relationships (Quadrant III, 18):
+  Akkermansia_muciniphila x Pelargonic acid (TrajMM=0.993, chain_count=22, ChainNov=0.087)
+  Akkermansia_muciniphila x Ribothymidine (TrajMM=0.966, chain_count=1, ChainNov=0.798)
+  Akkermansia_muciniphila x 2-Ethylacrylic acid (TrajMM=0.952, chain_count=19, ChainNov=0.128)
+  Akkermansia_muciniphila x 3-Methyl-2-oxopentanoate (TrajMM=0.938, chain_count=30, ChainNov=0.000)
+  Akkermansia_muciniphila x Tauroursodeoxycholic acid (TrajMM=0.897, chain_count=2, ChainNov=0.680)
+
+Saved 146 quadrant results to E:\Onedrive\Apps\Research\TrajMM_nov\outputs\step3_quadrant.json
+
+======================================================================
+  PIPELINE COMPLETE
+======================================================================
+
+Total duration: 7367.5s
+  step1: 0.0s
+  step2: 0.5s
+  step2b: 7366.4s
+  step3: 0.6s
+
+Quadrant distribution: {'I': 55, 'III': 18, 'II': 54, 'IV': 19}
+PIPELINE RESULT: completed

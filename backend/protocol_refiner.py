@@ -19,7 +19,6 @@ try:
 except ImportError:  # pragma: no cover - runtime guard
     requests = None
 
-from agents.pubmed_query import build_pubmed_query
 from llm_reasoning import OPENAI_API_BASE, OPENAI_API_KEY, OPENAI_MODEL
 
 BACKEND_DIR = Path(__file__).parent
@@ -162,7 +161,7 @@ def _candidate_metrics(rec: Optional[dict], disease: str) -> Dict[str, Any]:
         "bacteria": rec.get("bacteria", ""),
         "metabolite": rec.get("metabolite", ""),
         "disease": rec.get("disease") or disease,
-        "mmsage_norm": rec.get("mmsage_norm", 0),
+        "mmsage_norm": rec.get("mmsage_norm", rec.get("trajmm_norm", 0)),
         "pair_bm_exp": rec.get("pair_bm_exp", 0),
         "pair_md_exp": rec.get("pair_md_exp", 0),
         "chain_count": rec.get("chain_count", 0),
@@ -206,10 +205,8 @@ def _fetch_supporting_literature(bacteria: str, metabolite: str, disease: str) -
     try:
         from build_kg import fetch_abstracts, search_pubmed
 
-        bm_query = build_pubmed_query([bacteria, metabolite])
-        md_query = build_pubmed_query([metabolite, disease])
-        bm_articles = fetch_abstracts(search_pubmed(bm_query, max_results=3))
-        md_articles = fetch_abstracts(search_pubmed(md_query, max_results=3))
+        bm_articles = fetch_abstracts(search_pubmed(f"{bacteria.replace('_', ' ')} {metabolite}", max_results=3))
+        md_articles = fetch_abstracts(search_pubmed(f"{metabolite} {disease}", max_results=3))
         articles = []
         for article in bm_articles:
             a = dict(article)

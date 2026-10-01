@@ -11,7 +11,6 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
 
-from agents.pubmed_query import build_pubmed_query
 from build_kg import fetch_abstracts, search_pubmed
 from protocol_refiner import _chat_json, _prepare_protocol_support, articles_to_export
 from protocols_io_tool import collect_protocol_evidence
@@ -445,7 +444,7 @@ def _build_question_keyword_query_specs(
         part for part in [research_question, prompt_constraints] if str(part or "").strip()
     )
     keywords = _extract_question_keywords(source_text, limit=24)
-    disease_block = build_pubmed_query([disease]) if str(disease or "").strip() else ""
+    disease_block = "(" + _quoted_or_clause(_disease_aliases(disease)) + ")" if disease else ""
     specs: List[dict] = []
     seen_queries: set[str] = set()
 
@@ -479,7 +478,7 @@ def _build_question_keyword_query_specs(
         cleaned_terms = _dedupe_preserve([str(term).strip() for term in terms if str(term).strip()])
         if not cleaned_terms:
             continue
-        keyword_block = build_pubmed_query(cleaned_terms[:6])
+        keyword_block = " AND ".join(cleaned_terms[:6])
         query = f"{keyword_block} AND {disease_block}" if disease_block else keyword_block
         _append_query_spec(
             specs,
@@ -860,7 +859,7 @@ def _http_get_json(url: str, params: Optional[Dict[str, Any]] = None) -> Any:
     request = Request(
         full_url,
         headers={
-            "User-Agent": "MMSage-ValidationPlan/1.0",
+            "User-Agent": "TrajMM-ValidationPlan/1.0",
             "Accept": "application/json",
         },
     )
@@ -6962,9 +6961,12 @@ def _quoted_or_clause(values: List[str]) -> str:
 
 
 def _build_round_one_query_specs(bacteria: str, metabolite: str, disease: str) -> List[dict]:
-    b_expr = build_pubmed_query([bacteria])
-    m_expr = build_pubmed_query([metabolite])
-    d_expr = build_pubmed_query([disease])
+    bacteria_terms = _entity_aliases(bacteria)
+    metabolite_terms = _entity_aliases(metabolite)
+    disease_terms = _disease_aliases(disease)
+    b_expr = "(" + _quoted_or_clause(bacteria_terms) + ")"
+    m_expr = "(" + _quoted_or_clause(metabolite_terms) + ")"
+    d_expr = "(" + _quoted_or_clause(disease_terms) + ")"
     return [
         {
             "round": 1,
@@ -7040,8 +7042,8 @@ def _fallback_question_query(research_question: str, disease: str) -> str:
     keyword_tokens = _extract_question_keywords(clean_question)
     method_block = "(\"in vitro\" OR cell OR animal OR mouse OR methods OR protocol OR cohort OR patient)"
     validation_block = "(validation OR experiment OR protocol OR methods)"
-    keyword_query = build_pubmed_query(keyword_tokens[:5])
-    disease_block = build_pubmed_query([disease]) if str(disease or "").strip() else ""
+    keyword_query = " AND ".join(f"\"{token}\"" if " " in token else token for token in keyword_tokens[:5])
+    disease_block = "(" + _quoted_or_clause(_disease_aliases(disease)) + ")" if disease else ""
 
     if keyword_query and disease_block:
         return f"({keyword_query}) AND {disease_block} AND {method_block}"
@@ -7064,14 +7066,54 @@ def build_question_only_query_specs(
         disease=disease,
         max_specs=8,
     )
+    if not (research_question or "").strip():
+        return keyword_specs or [
+            {
+                "round": 1,
+                "label": "Question-driven evidence search",
+                "rationale": "Fallback search for literature that can support a basic validation protocol.",
+                "query": fallback_query,
+            }
+        ]
+
+    system_prompt = """Translate a user's standalone validation question into one focused PubMed query.
+
+Return JSON with exactly these keys:
+- query
+- rationale
+
+Requirements:
+- The query must be in English and valid for PubMed.
+- Prioritize literature that helps design experiments to answer the user's question.
+- Emphasize methods, concentrations, doses, time windows, cell systems, animal models, and practical readouts.
+- Keep the query under 600 characters."""
+    user_prompt = f"""Standalone validation question:
+{_format_user_brief(research_question, prompt_constraints)}
+
+Disease scope:
+{disease or 'Not specified'}
+
+Generate one focused PubMed query."""
+    focused_query = ""
+    focused_rationale = ""
+    try:
+        raw = _chat_json(system_prompt, user_prompt, max_tokens=500, temperature=0.1)
+        focused_query = str(raw.get("query") or "").strip()
+        focused_rationale = str(
+            raw.get("rationale") or "Search for literature directly answering the user's experimental question."
+        ).strip()
+    except Exception:
+        focused_query = ""
+        focused_rationale = ""
+
     specs: List[dict] = []
     seen_queries: set[str] = set()
     _append_query_spec(
         specs,
         seen_queries,
-        fallback_query,
+        focused_query or fallback_query,
         "Question-driven evidence search",
-        "Search for literature directly addressing keywords from the user's experimental question.",
+        focused_rationale or "Fallback search for literature directly answering the user's experimental question.",
     )
     for spec in keyword_specs:
         _append_query_spec(
@@ -7486,20 +7528,42 @@ def build_user_focus_query_spec(
     if not (research_question or "").strip():
         return None
 
-    entity_query = build_pubmed_query([bacteria, metabolite, disease])
-    source_text = " ".join(
-        part for part in [research_question, prompt_constraints] if str(part or "").strip()
-    )
-    keyword_query = build_pubmed_query(_extract_question_keywords(source_text, limit=4))
-    query = " AND ".join(part for part in [entity_query, keyword_query] if part)
-    if not query:
+    system_prompt = """Translate a user's Step 3 research brief into one focused PubMed query.
+
+Return JSON with exactly these keys:
+- query
+- rationale
+
+Requirements:
+- The query must be in English and valid for PubMed.
+- Preserve the candidate microbe, metabolite, and disease names.
+- Prioritize literature that helps design experiments to answer the user's research question.
+- Add only the experimental concepts needed to answer the user's question.
+- Prefer cell, microbial culture, animal model, mechanism, dose, and methods terms.
+- Do not include instructions about formatting or writing style.
+- Keep the query under 600 characters."""
+    user_prompt = f"""Candidate:
+Microbe: {bacteria}
+Metabolite: {metabolite}
+Disease: {disease}
+
+User-defined Step 3 brief:
+{_format_user_brief(research_question, prompt_constraints)}
+
+Generate one focused PubMed query."""
+    try:
+        raw = _chat_json(system_prompt, user_prompt, max_tokens=500, temperature=0.1)
+        query = str(raw.get("query") or "").strip()
+        if not query:
+            return None
+        return {
+            "round": 1,
+            "label": "User-defined research focus",
+            "rationale": str(raw.get("rationale") or "Search for evidence directly addressing the user's Step 3 question.").strip(),
+            "query": query[:600],
+        }
+    except Exception:
         return None
-    return {
-        "round": 1,
-        "label": "User-defined research focus",
-        "rationale": "Search for evidence directly addressing the user's Step 3 question.",
-        "query": query[:600],
-    }
 
 
 def rank_question_evidence_strength(
@@ -7884,9 +7948,12 @@ def generate_followup_queries(
     research_question: str = "",
     user_focus_query: str = "",
 ) -> List[dict]:
-    b_expr = build_pubmed_query([bacteria])
-    m_expr = build_pubmed_query([metabolite])
-    d_expr = build_pubmed_query([disease])
+    bacteria_terms = _entity_aliases(bacteria)
+    metabolite_terms = _entity_aliases(metabolite)
+    disease_terms = _disease_aliases(disease)
+    b_expr = "(" + _quoted_or_clause(bacteria_terms) + ")"
+    m_expr = "(" + _quoted_or_clause(metabolite_terms) + ")"
+    d_expr = "(" + _quoted_or_clause(disease_terms) + ")"
     evidence_by_topic = {item.get("topic"): item for item in evidence_strength_map}
     query_specs = []
 
@@ -8774,11 +8841,20 @@ def generate_question_driven_validation_plan(
     question_specs = build_question_only_query_specs(
         research_question=research_question,
         prompt_constraints=prompt_constraints,
-        disease=disease,
+        disease=design_disease,
+    )
+    candidate_specs = (
+        _build_round_one_query_specs(
+            extracted_candidate.get("bacteria") or "",
+            extracted_candidate.get("metabolite") or "",
+            design_disease,
+        )
+        if candidate_entities_resolved
+        else []
     )
     round_one_specs: List[dict] = []
     seen_queries: set[str] = set()
-    for spec in question_specs:
+    for spec in candidate_specs + question_specs:
         query = str(spec.get("query") or "").strip()
         if not query or query.lower() in seen_queries:
             continue
@@ -8823,9 +8899,25 @@ def generate_question_driven_validation_plan(
     followup_specs = generate_question_followup_queries(
         research_question=research_question,
         prompt_constraints=prompt_constraints,
-        seed_query=(round_one_specs[0].get("query") if round_one_specs else "") or _fallback_question_query(research_question, disease),
+        seed_query=(round_one_specs[0].get("query") if round_one_specs else "") or _fallback_question_query(research_question, design_disease),
         evidence_strength_map=initial_strength_map,
     )
+    if candidate_entities_resolved:
+        edge_followups = _build_candidate_missing_edge_query_specs(
+            extracted_candidate.get("bacteria") or "",
+            extracted_candidate.get("metabolite") or "",
+            design_disease,
+            initial_strength_map,
+        )
+        merged_followups: List[dict] = []
+        seen_followup_queries: set[str] = set()
+        for spec in edge_followups + followup_specs:
+            query = str(spec.get("query") or "").strip()
+            if not query or query.lower() in seen_followup_queries:
+                continue
+            seen_followup_queries.add(query.lower())
+            merged_followups.append(spec)
+        followup_specs = merged_followups[:6]
     _report_progress(progress_callback, "round2_search", "Running follow-up PubMed queries and merging evidence.", 58)
     followup_round = search_literature_online(followup_specs, max_results=QUESTION_MAX_QUERY_RESULTS)
     merged_literature = _filter_question_relevant_articles(
