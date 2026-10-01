@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -22,7 +22,40 @@
     </nav>
 
     <main class="max-w-4xl mx-auto px-4 py-6">
-        <!-- Pipeline Steps -->
+        <div class="bg-white rounded-lg shadow p-6 mb-6">
+            <h2 class="text-lg font-semibold mb-1">Correlation ranking</h2>
+            <p class="text-sm text-gray-500 mb-4">Upload two abundance matrices to generate an independent ranked CSV using all input microbes and metabolites.</p>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <label class="block text-sm font-medium text-gray-700">Microbes abundance matrix
+                    <span class="mt-2 flex items-center gap-3 w-full border rounded px-3 py-2">
+                        <label for="cor-microbes" class="cursor-pointer px-3 py-1 border rounded bg-gray-50 hover:bg-gray-100">Choose File</label>
+                        <span id="cor-microbes-name" class="text-gray-500">No file chosen</span>
+                        <input id="cor-microbes" type="file" accept=".csv,.tsv,.txt" class="hidden">
+                    </span>
+                </label>
+                <label class="block text-sm font-medium text-gray-700">Metabolites abundance matrix
+                    <span class="mt-2 flex items-center gap-3 w-full border rounded px-3 py-2">
+                        <label for="cor-metabolites" class="cursor-pointer px-3 py-1 border rounded bg-gray-50 hover:bg-gray-100">Choose File</label>
+                        <span id="cor-metabolites-name" class="text-gray-500">No file chosen</span>
+                        <input id="cor-metabolites" type="file" accept=".csv,.tsv,.txt" class="hidden">
+                    </span>
+                </label>
+                <label class="block text-sm font-medium text-gray-700">Target Microbe (Optional)
+                    <input id="cor-microbe-filter" type="text" value="Cyanobacteria" placeholder="Enter a microbe name from the uploaded file" class="mt-2 block w-full text-sm border rounded px-3 py-2">
+                </label>
+                <label class="block text-sm font-medium text-gray-700">Significance Threshold (P-value)
+                    <input id="cor-pthreshold" type="number" min="0" max="1" step="0.001" value="0.05" class="mt-2 block w-full text-sm border rounded px-3 py-2">
+                </label>
+            </div>
+            <div class="mt-4 flex items-center gap-3">
+                <button onclick="runCorrelation()" id="cor-run-btn" class="px-6 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 font-medium">Generate ranked results</button>
+                <span id="cor-status" class="text-sm text-gray-600"></span>
+                <a id="cor-download" class="hidden px-4 py-2 bg-green-600 text-white rounded-md text-sm" download>Download results ZIP</a>
+                <a id="cor-ranking" class="hidden px-4 py-2 bg-blue-600 text-white rounded-md text-sm" download>Download ranking CSV</a>
+                <span id="cor-output-location" class="hidden text-xs text-gray-500"></span>
+            </div>
+        </div>
+        <!-- M1-M4 Pipeline Steps -->
         <div class="bg-white rounded-lg shadow p-6 mb-6">
             <h2 class="text-lg font-semibold mb-4">Pipeline Progress</h2>
             <div class="flex items-center justify-between mb-6">
@@ -33,55 +66,19 @@
                         <div class="step-dot w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold bg-gray-200 text-gray-600" id="dot-2">2</div>
                         <div class="flex-1 h-1 bg-gray-200 mx-2" id="line-2"></div>
                         <div class="step-dot w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold bg-gray-200 text-gray-600" id="dot-3">3</div>
+                        <div class="flex-1 h-1 bg-gray-200 mx-2" id="line-3"></div>
+                        <div class="step-dot w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold bg-gray-200 text-gray-600" id="dot-4">4</div>
                     </div>
                     <div class="flex justify-between mt-2 text-xs text-gray-500">
-                        <span>MMSage Signal</span>
-                        <span>Chain Novelty</span>
-                        <span>Quadrant</span>
+                        <span>M1 Input &amp; RCLR</span>
+                        <span>M2 Root Selection</span>
+                        <span>M3 Interaction Matrix</span>
+                        <span>M4 Trajectory Ranking</span>
                     </div>
                 </div>
             </div>
             <div class="text-center">
                 <span class="text-sm font-medium" id="status-text">Status: idle</span>
-            </div>
-        </div>
-
-        <!-- Configuration -->
-        <div class="bg-white rounded-lg shadow p-6 mb-6">
-            <h2 class="text-lg font-semibold mb-4">Configuration</h2>
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Coordinates Directory</label>
-                    <input id="cfg-coords" type="text" class="w-full border rounded px-3 py-2 text-sm"
-                           value="data/sample_coordinates">
-                </div>
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Bacteria Filter (optional)</label>
-                    <input id="cfg-filter" type="text" class="w-full border rounded px-3 py-2 text-sm"
-                           placeholder="e.g. Akkermansia">
-                </div>
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Top-N Candidates</label>
-                    <input id="cfg-topn" type="number" class="w-full border rounded px-3 py-2 text-sm" value="200">
-                </div>
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Disease Context</label>
-                    <input id="cfg-disease" type="text" class="w-full border rounded px-3 py-2 text-sm" value="IBD">
-                </div>
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Max KG Depth</label>
-                    <input id="cfg-depth" type="number" class="w-full border rounded px-3 py-2 text-sm" value="3">
-                </div>
-            </div>
-            <div class="mt-6 flex space-x-4">
-                <button onclick="runPipeline()" id="run-btn"
-                        class="px-6 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 font-medium">
-                    Run Pipeline
-                </button>
-                <button onclick="checkStatus()"
-                        class="px-4 py-2 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300 text-sm">
-                    Refresh Status
-                </button>
             </div>
         </div>
 
@@ -96,70 +93,109 @@ Waiting for pipeline run...
 
     <script>
     let pollInterval = null;
+    let correlationPoll = null;
 
-    async function runPipeline() {
-        const config = {
-            coordinates_dir: document.getElementById('cfg-coords').value,
-            bacteria_filter: document.getElementById('cfg-filter').value || null,
-            top_n: parseInt(document.getElementById('cfg-topn').value) || 200,
-            disease: document.getElementById('cfg-disease').value || 'IBD',
-            max_depth: parseInt(document.getElementById('cfg-depth').value) || 3,
-        };
-
-        appendLog('Starting pipeline...');
-        document.getElementById('run-btn').disabled = true;
-        document.getElementById('run-btn').textContent = 'Running...';
-
-        try {
-            const resp = await fetch('/api/pipeline/run', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify(config),
-            });
-            const result = await resp.json();
-            appendLog('Pipeline triggered: ' + JSON.stringify(result));
-
-            if (!pollInterval) {
-                pollInterval = setInterval(checkStatus, 3000);
-            }
-        } catch (e) {
-            appendLog('ERROR: ' + e.message);
-            document.getElementById('run-btn').disabled = false;
-            document.getElementById('run-btn').textContent = 'Run Pipeline';
-        }
+    for (const name of ['microbes', 'metabolites']) {
+        document.getElementById('cor-' + name).addEventListener('change', function () {
+            document.getElementById('cor-' + name + '-name').textContent = this.files[0]?.name || 'No file chosen';
+        });
     }
 
-    async function checkStatus() {
+    async function loadExampleFile(inputId, filename) {
+        const response = await fetch('/api/example-input/' + filename);
+        if (!response.ok) throw new Error('Example input unavailable: ' + filename);
+        const blob = await response.blob();
+        const file = new File([blob], filename, {type: 'text/tab-separated-values'});
+        const input = document.getElementById(inputId);
+        const transfer = new DataTransfer();
+        transfer.items.add(file);
+        input.files = transfer.files;
+        document.getElementById(inputId + '-name').textContent = filename;
+    }
+
+    window.addEventListener('DOMContentLoaded', async () => {
         try {
-            const resp = await fetch('/api/pipeline/status');
-            const status = await resp.json();
+            await Promise.all([
+                loadExampleFile('cor-microbes', 'microbes.tsv'),
+                loadExampleFile('cor-metabolites', 'metabolites.tsv')
+            ]);
+            document.getElementById('cor-status').textContent = 'Example inputs loaded.';
+        } catch (error) {
+            document.getElementById('cor-status').textContent = 'Example inputs unavailable; choose files manually.';
+        }
+    });
 
-            document.getElementById('status-text').textContent = 'Status: ' + status.status;
+    async function runCorrelation() {
+        const status = document.getElementById('cor-status');
+        const form = new FormData();
+        for (const name of ['microbes', 'metabolites']) {
+            const file = document.getElementById('cor-' + name).files[0];
+            if (!file) { status.textContent = 'Please select both abundance matrices.'; return; }
+            form.append(name, file);
+        }
+        const button = document.getElementById('cor-run-btn'); button.disabled = true; status.textContent = 'Uploading...';
+        document.getElementById('cor-download').classList.add('hidden');
+        document.getElementById('cor-ranking').classList.add('hidden');
+        document.getElementById('cor-output-location').classList.add('hidden');
+        try {
+            const filter = document.getElementById('cor-microbe-filter').value.trim();
+            const params = new URLSearchParams();
+            if (filter) params.set('microbe_filter', filter);
+            params.set('top_n', '50');
+            params.set('p_threshold', document.getElementById('cor-pthreshold').value || '0.05');
+            params.set('num_dim', '20');
+            params.set('neighbors', '3');
+            params.set('min_dist', '0.5');
+            params.set('metric', 'cosine');
+            params.set('cluster_res', '0.1');
+            const query = '?' + params.toString();
+            const response = await fetch('/api/correlation/jobs' + query, {method: 'POST', body: form});
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.detail || 'Upload failed');
+            const poll = async () => {
+                const result = await (await fetch('/api/correlation/jobs/' + data.job_id)).json();
+                updateProgress(result.progress, result.status);
+                status.textContent = result.status === 'completed' ? `Complete: ${result.coordinate_files} coordinate files, ${result.rows} rows` : (result.error || result.progress || result.status);
+                if (result.status === 'completed') {
+                    const link = document.getElementById('cor-download'); link.href = result.download; link.classList.remove('hidden');
+                    const location = document.getElementById('cor-output-location');
+                    location.textContent = `Output location: ${result.download} | Job ID: ${data.job_id}`;
+                    location.classList.remove('hidden');
+                    const ranking = document.getElementById('cor-ranking'); ranking.href = '/api/correlation/jobs/' + data.job_id + '/ranking'; ranking.classList.remove('hidden');
+                    button.disabled = false; clearInterval(correlationPoll);
+                } else if (result.status === 'error') { button.disabled = false; clearInterval(correlationPoll); }
+            };
+            correlationPoll = setInterval(() => poll().catch(error => {
+                status.textContent = "Status query failed: " + error.message;
+                button.disabled = false; clearInterval(correlationPoll);
+            }), 3000); await poll();
+        } catch (error) { status.textContent = 'ERROR: ' + error.message; button.disabled = false; }
+    }
 
-            const completed = status.steps_completed || [];
-            for (let i = 1; i <= 3; i++) {
-                const dot = document.getElementById('dot-' + i);
-                if (completed.includes(i)) {
-                    dot.className = 'step-dot w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold bg-green-500 text-white';
-                } else if (status.current_step === i && status.status === 'running') {
-                    dot.className = 'step-dot w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold bg-indigo-500 text-white animate-pulse';
-                }
-                if (i < 3) {
-                    const line = document.getElementById('line-' + i);
-                    if (completed.includes(i)) {
-                        line.className = 'flex-1 h-1 bg-green-500 mx-2';
-                    }
-                }
+    function updateProgress(progress, state) {
+        const stages = [
+            'Validating input tables',
+            'Resolving target CAGs and applying CLR',
+            'Selecting roots at P < 0.05 (NArank 1, 2, 3, 5)',
+            'Building interaction matrices',
+            'Computing configured trajectory configurations per CAG',
+            'Complete'
+        ];
+        let active = stages.findIndex(label => progress === label);
+        if (state === 'completed') active = stages.length - 1;
+        if (active < 0) return;
+        const step = Math.min(4, Math.max(1, active));
+        for (let i = 1; i <= 4; i++) {
+            const dot = document.getElementById('dot-' + i);
+            if (!dot) continue;
+            const done = i < step || state === 'completed';
+            const current = i === step && state !== 'completed';
+            dot.className = 'step-dot w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold ' +
+                (done ? 'bg-green-500 text-white' : current ? 'bg-indigo-500 text-white animate-pulse' : 'bg-gray-200 text-gray-600');
+            if (i < 4) {
+                const line = document.getElementById('line-' + i);
+                if (line) line.className = 'flex-1 h-1 mx-2 ' + (i < step || state === 'completed' ? 'bg-green-500' : 'bg-gray-200');
             }
-
-            if (status.status === 'completed' || status.status === 'error') {
-                if (pollInterval) { clearInterval(pollInterval); pollInterval = null; }
-                document.getElementById('run-btn').disabled = false;
-                document.getElementById('run-btn').textContent = 'Run Pipeline';
-                appendLog('Pipeline ' + status.status + (status.error ? ': ' + status.error : ''));
-            }
-        } catch (e) {
-            appendLog('Status check failed: ' + e.message);
         }
     }
 
@@ -170,22 +206,6 @@ Waiting for pipeline run...
         log.scrollTop = log.scrollHeight;
     }
 
-    async function loadConfig() {
-        try {
-            const resp = await fetch('/api/config');
-            if (!resp.ok) return;
-            const config = await resp.json();
-            if (config.coordinates_dir) document.getElementById('cfg-coords').value = config.coordinates_dir;
-            if (config.top_n != null) document.getElementById('cfg-topn').value = config.top_n;
-            if (config.disease) document.getElementById('cfg-disease').value = config.disease;
-            if (config.max_depth != null) document.getElementById('cfg-depth').value = config.max_depth;
-        } catch (e) {
-            appendLog('Configuration load failed: ' + e.message);
-        }
-    }
-
-    loadConfig();
-    checkStatus();
     </script>
 </body>
 </html>

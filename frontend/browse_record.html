@@ -132,8 +132,7 @@
                         </div>
                     </div>
                     <div class="bg-indigo-50 rounded-lg p-3 border-l-4 border-indigo-500 mt-6">
-                        <div class="text-xs font-semibold uppercase text-indigo-600 mb-1">Prioritization</div>
-                        <div id="prioritization" class="text-sm text-indigo-900 font-medium"></div>
+                        <div id="causal-chain" class="text-sm text-indigo-900 font-medium"></div>
                     </div>
                 </div>
             </div>
@@ -305,7 +304,7 @@ No protocol generated yet.</pre>
         novEl.textContent = `${nov.toFixed(3)} ${isNovel ? '★ novel' : 'known'}`;
         novEl.style.color = isNovel ? '#d97706' : '#059669';
 
-        document.getElementById('prioritization').textContent =
+        document.getElementById('causal-chain').textContent =
             `${bactLabel} → ${item.metabolite} → ${_disease} | Composite: ${composite.toFixed(2)}`;
     }
 

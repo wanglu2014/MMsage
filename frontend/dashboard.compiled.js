@@ -775,7 +775,7 @@ function App() {
       renderKG(kg);
       setAnalysisResult({
         ...selectedPair,
-        prioritization: `${bacteria.replace(/_/g, " ")} → ${metabolite} → ${disease} | Composite: ${(selectedPair.composite_score ?? 0).toFixed(2)}`
+        causal_chain: `${bacteria.replace(/_/g, " ")} → ${metabolite} → ${disease} | Composite: ${(selectedPair.composite_score ?? 0).toFixed(2)}`
       });
     } catch (err) {
       console.error("KG render failed:", err);
@@ -904,11 +904,11 @@ function App() {
     window._kgCy = cytoscape({
       container,
       elements: [...nodes, ...edges],
-      // Enable mouse-wheel zooming and panning.
+      // 开启鼠标滚轮缩放和平移（你可以直接用鼠标滚轮放大看细节）
       userZoomingEnabled: true,
       userPanningEnabled: true,
       style: [
-      // Base nodes use larger, high-contrast labels.
+      // 1. 基础节点：字号加码，底色反差拉满
       {
         selector: "node",
         style: {
@@ -921,7 +921,7 @@ function App() {
           },
           "color": "#111827",
           "font-size": 18,
-          // Improve readability in scientific figures.
+          // 科研展示加强可读性
           "font-weight": "700",
           "text-wrap": "wrap",
           "text-max-width": 180,
@@ -935,21 +935,21 @@ function App() {
           "text-outline-color": "#ffffff",
           "text-outline-width": 2,
           "width": 66,
-          // Enlarge base nodes.
+          // 基础节点加大
           "height": 66,
           "border-width": 2,
           "border-color": "#ffffff"
         }
       },
-      // Emphasize the three core target nodes.
+      // 2. 三个核心靶点：巨无霸尺寸，绝对的视觉焦点
       {
         selector: "node[?is_core]",
         style: {
           "width": 116,
-          // Enlarge core nodes.
+          // 核心节点进一步放大
           "height": 116,
           "font-size": 24,
-          // Increase core label size.
+          // 核心字号进一步提高
           "font-weight": "900",
           "text-max-width": 220,
           "border-width": 5,
@@ -957,7 +957,7 @@ function App() {
           "text-background-opacity": 1
         }
       },
-      // Base edges use thicker strokes and white text outlines.
+      // 3. 基础连线：加粗加白边
       {
         selector: "edge",
         style: {
@@ -974,7 +974,7 @@ function App() {
           "text-outline-width": 4
         }
       },
-      // Highlight the core inference chain with a thick dark-blue stroke.
+      // 4. 核心推理主链：极粗，深蓝色醒目显示
       {
         selector: "edge[?is_chain]",
         style: {
@@ -994,15 +994,15 @@ function App() {
           "border-color": "#eab308"
         }
       }],
-      // Tighten layout spacing so the graph fills the viewport.
+      // 5. 核心魔法：缩短物理间距，骗系统自动放大镜头！
       layout: {
         name: "dagre",
         rankDir: "LR",
         nodeSep: 30,
-        // Reduce vertical spacing.
+        // 把上下的间距狠狠压缩
         rankSep: 90,
-        // Reduce rank spacing.
-        padding: 15 // Remove excess outer padding.
+        // 把左右的层级间距狠狠压缩
+        padding: 15 // 去掉过多的边缘留白
       }
     });
     const captureKgImage = () => {
@@ -1115,7 +1115,7 @@ function App() {
       if (plotEl) downloadPlotSvg(plotEl);
     },
     className: "text-xs px-3 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition",
-    title: "Vector SVG - 210 x 99 mm (A4 page width x one-third page height)"
+    title: "Vector SVG — 210×99 mm (A4 页宽 × 页高 1/3)"
   }, "Export SVG"), /*#__PURE__*/React.createElement("button", {
     onClick: () => {
       Plotly.downloadImage("main-plot", {
@@ -1340,10 +1340,8 @@ function App() {
   }, (selectedPair.novelty_score ?? 0).toFixed(3), " ", (selectedPair.novelty_score ?? 1) >= 1.0 ? "★ novel" : "known"))), analysisResult && /*#__PURE__*/React.createElement("div", {
     className: "bg-indigo-50 rounded-lg p-3 border-l-4 border-indigo-500 mt-auto"
   }, /*#__PURE__*/React.createElement("div", {
-    className: "text-xs font-semibold uppercase text-indigo-600 mb-1"
-  }, "Prioritization"), /*#__PURE__*/React.createElement("div", {
     className: "text-sm text-indigo-900 font-medium"
-  }, analysisResult.prioritization))) : /*#__PURE__*/React.createElement("div", {
+  }, analysisResult.causal_chain))) : /*#__PURE__*/React.createElement("div", {
     className: "text-gray-400 text-center flex-1 flex items-center justify-center"
   }, "Select a candidate to view analysis")))), /*#__PURE__*/React.createElement("div", {
     id: "step3-card",

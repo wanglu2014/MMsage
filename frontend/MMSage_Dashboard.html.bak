@@ -184,7 +184,7 @@
   <body class="bg-white text-gray-800">
     <div id="root"></div>
 
-    <script src="/static/dashboard.compiled.js?v=20260726-2">
+    <script src="/static/dashboard.compiled.js?v=20260625-1">
       const { useEffect, useState, useMemo, useCallback, useRef } = React;
       const API_BASE = window.location.origin;
 

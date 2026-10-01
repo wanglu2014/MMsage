@@ -45,7 +45,7 @@
             <div class="bg-white rounded-lg shadow p-4">
                 <div class="text-sm text-gray-500">MMSage Signal</div>
                 <div class="text-2xl font-bold text-indigo-600" id="val-mmsage">-</div>
-                <div class="text-xs text-gray-400" id="val-rank"></div>
+                <div class="text-xs text-gray-400" id="val-pseudotime"></div>
             </div>
             <div class="bg-white rounded-lg shadow p-4">
                 <div class="text-sm text-gray-500">Chain Count</div>
@@ -162,8 +162,8 @@
 
         // Scores
         document.getElementById('val-mmsage').textContent = (item.mmsage_norm || 0).toFixed(4);
-        document.getElementById('val-rank').textContent =
-            `Rank: ${cand.rank_in_microbe || '?'}/${cand.total_in_microbe || '?'}`;
+        document.getElementById('val-pseudotime').textContent =
+            `Pseudotime: ${(cand.pseudotime || 0).toFixed(2)}, Rank: ${cand.rank_in_microbe || '?'}/${cand.total_in_microbe || '?'}`;
         document.getElementById('val-chain-count').textContent = item.chain_count != null ? item.chain_count : '-';
         document.getElementById('val-novelty').textContent = (item.chain_novelty != null ? item.chain_novelty : 1).toFixed(4);
         document.getElementById('val-novelty').style.color =
