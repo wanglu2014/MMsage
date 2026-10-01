@@ -2,8 +2,9 @@
 # MMSage M3: per-microbe 交互矩阵 (comb_XY)
 # sCor[j,s] = clr_metabolite[j,s] * clr_microbe[m,s]
 
-MC <- "E:/Onedrive/mon345/02_TRAjMM/heart/metacard"
-OUT <- file.path(MC, "mmsage_out")
+MC <- Sys.getenv("MMSAGE_JOB_DIR")
+if (!nzchar(MC)) stop("MMSAGE_JOB_DIR must identify the job input directory")
+OUT <- Sys.getenv("MMSAGE_OUTPUT_DIR", unset=file.path(MC, "mmsage_out"))
 dir.create(file.path(OUT, "pluscomb"), showWarnings=FALSE, recursive=TRUE)
 
 cat("========== MMSage M3: pluscombno1 ==========\n")
@@ -14,6 +15,7 @@ clr_mic <- t(cache$clr_mic)   # samples x microbes
 clr_met <- t(cache$clr_met)   # samples x metabolites
 target_cags <- cache$all_target_cags  # CAG字符向量
 
+
 commrow <- rownames(clr_mic)
 stopifnot(identical(commrow, rownames(clr_met)))
 
@@ -21,12 +23,13 @@ cat("Samples:", length(commrow), "| Metabolites:", ncol(clr_met), "| Target CAGs
 
 for (m in target_cags) {
   vecY <- clr_mic[, m]  # 微生物向量
+  met_for_run <- clr_met
   # 一次性算所有代谢物: sCor[s,j] = clr_met[s,j] * vecY[s]
-  scor_mat <- clr_met * vecY  # 样本 x 代谢物
+  scor_mat <- met_for_run * vecY  # 样本 x 代谢物
   # 长格式
   long_df <- data.frame(
-    samples = rep(commrow, times=ncol(clr_met)),
-    rowcolumn = rep(paste(colnames(clr_met), m, sep="-"), each=length(commrow)),
+    samples = rep(commrow, times=ncol(met_for_run)),
+    rowcolumn = rep(paste(colnames(met_for_run), m, sep="-"), each=length(commrow)),
     sCor = as.vector(scor_mat),
     stringsAsFactors = FALSE
   )

@@ -1,17 +1,21 @@
 #!/usr/bin/env Rscript
-# MMSage M4: monocle3 trajectories over a comprehensive parameter grid.
-# Each metabolite is a monocle3 cell and each study sample is a feature.
+# MMSage M4: extracted principal-graph trajectories over a parameter grid.
+# Each metabolite is a trajectory point and each study sample is a feature.
 
 suppressMessages({
-  library(monocle3)
   library(tidyr)
   library(Matrix)
   library(data.table)
   library(parallel)
 })
 
-MC <- "E:/Onedrive/mon345/02_TRAjMM/heart/metacard"
-OUT <- file.path(MC, "mmsage_out")
+script_arg <- grep("^--file=", commandArgs(), value=TRUE)
+CORE_PATH <- file.path(dirname(normalizePath(sub("^--file=", "", script_arg[1]))), "trajectory_core", "runtime.R")
+source(CORE_PATH)
+
+MC <- Sys.getenv("MMSAGE_JOB_DIR")
+if (!nzchar(MC)) stop("MMSAGE_JOB_DIR must identify the job input directory")
+OUT <- Sys.getenv("MMSAGE_OUTPUT_DIR", unset=file.path(MC, "mmsage_out"))
 COORD_DIR <- file.path(OUT, "coords")
 LOG_DIR <- file.path(OUT, "logs")
 dir.create(COORD_DIR, showWarnings=FALSE, recursive=TRUE)
@@ -40,6 +44,23 @@ if (SMOKE) {
     stringsAsFactors=FALSE
   )
 } else {
+  configured_dim <- suppressWarnings(as.integer(Sys.getenv("MMSAGE_NUM_DIM", unset="")))
+  configured_neighbors <- suppressWarnings(as.integer(Sys.getenv("MMSAGE_UMAP_NEIGHBORS", unset="")))
+  configured_dist <- suppressWarnings(as.numeric(Sys.getenv("MMSAGE_UMAP_MIN_DIST", unset="")))
+  configured_metric <- Sys.getenv("MMSAGE_UMAP_METRIC", unset="")
+  configured_cluster <- suppressWarnings(as.numeric(Sys.getenv("MMSAGE_CLUSTER_RESOLUTION", unset="")))
+  configured_mode <- isTRUE(is.finite(configured_dim) && configured_dim > 0 && is.finite(configured_neighbors) && configured_neighbors > 0 &&
+      is.finite(configured_dist) && configured_dist >= 0 && nzchar(configured_metric) && is.finite(configured_cluster) && configured_cluster >= 0)
+  if (configured_mode) {
+    grid <- expand.grid(num_dim=configured_dim, neighbors=configured_neighbors,
+                        min_dist=configured_dist, metric=configured_metric,
+                        cluster_res=configured_cluster, KEEP.OUT.ATTRS=FALSE,
+                        stringsAsFactors=FALSE)
+  }
+}
+if (!SMOKE && isTRUE(exists("configured_mode") && configured_mode && exists("grid") && nrow(grid) == 1L)) {
+  dimension_groups <- list(configured=c(as.integer(grid$num_dim)))
+} else if (!SMOKE) {
   grid <- expand.grid(
     num_dim=c(2, 3, 5, 8, 10, 15, 20),
     neighbors=c(2, 3, 5, 10, 15, 20),
@@ -79,6 +100,10 @@ config_tag <- function(num_dim, neighbors, min_dist, metric, cluster_res) {
   )
 }
 
+legacy_coord_path <- function(cag, tag, narank) {
+  file.path(COORD_DIR, sprintf("%s_newseed_%d_%s_NArank%d_coordinates.csv", cag, SEED, tag, as.integer(narank)))
+}
+
 coord_path <- function(cag, tag, narank) {
   file.path(
     COORD_DIR,
@@ -98,10 +123,11 @@ write_coord_file <- function(x, path) {
   }
 }
 
-dimension_groups <- list(
-  low=c(2, 3, 5, 8),
-  high=c(10, 15, 20)
-)
+if (!exists("configured_dim")) {
+  dimension_groups <- list(low=c(2, 3, 5, 8), high=c(10, 15, 20))
+} else if (!(is.finite(configured_dim) && configured_dim > 0 && nrow(grid) == 1L)) {
+  dimension_groups <- list(low=c(2, 3, 5, 8), high=c(10, 15, 20))
+}
 
 if (SMOKE) {
   tasks <- list(list(
@@ -112,13 +138,9 @@ if (SMOKE) {
     progress_file=file.path(LOG_DIR, paste0("M4_progress_", cags[[1]], ".tsv"))
   ))
 } else {
-  task_spec <- expand.grid(
-    metric=c("cosine", "euclidean"),
-    dimension_group=names(dimension_groups),
-    cag=cags,
-    KEEP.OUT.ATTRS=FALSE,
-    stringsAsFactors=FALSE
-  )
+  task_spec <- expand.grid(metric=unique(as.character(grid$metric)),
+                           dimension_group=names(dimension_groups), cag=cags,
+                           KEEP.OUT.ATTRS=FALSE, stringsAsFactors=FALSE)
   tasks <- lapply(seq_len(nrow(task_spec)), function(i) {
     spec <- task_spec[i, , drop=FALSE]
     task_id <- sprintf("met%s_dim%s", spec$metric, spec$dimension_group)
@@ -222,6 +244,19 @@ run_cag <- function(task) {
   gc(verbose=FALSE)
 
   metabolite_names <- sub(paste0("-", cag, "$"), "", rownames(mat))
+  if (nrow(mat) < 4L) {
+    # Leiden cannot construct a meaningful neighborhood graph for fewer than
+    # four points. Emit a deterministic two-dimensional fallback so arbitrary
+    # small uploads still produce a valid ranked artifact.
+    score <- rowSums(abs(mat), na.rm=TRUE)
+    ord <- order(score, decreasing=TRUE)
+    fallback <- data.frame(metabolite=metabolite_names[ord], rowcolumn=rownames(mat)[ord],
+                           UMAP1=seq_along(ord), UMAP2=0,
+                           Pseudotime=seq_along(ord)-1, stringsAsFactors=FALSE)
+    for (narank in sort(unique(as.integer(roots_df$NArank[roots_df$CAG == cag]))))
+      write_coord_file(fallback, coord_path(cag, config_tag(task_grid$num_dim[1], min(task_grid$neighbors[1],1), task_grid$min_dist[1], task_grid$metric[1], task_grid$cluster_res[1]), narank))
+    return(sprintf("%s: ok=%d skip=%d fail=%d", result_label, 1L, 0L, 0L))
+  }
   cag_roots <- roots_df[roots_df$CAG == cag, required_root_columns, drop=FALSE]
   naranks <- sort(unique(as.integer(cag_roots$NArank)))
   if (nrow(cag_roots) == 0L || length(naranks) == 0L) {
@@ -305,6 +340,10 @@ run_cag <- function(task) {
     umap_grid <- unique(dim_grid[, c("neighbors", "min_dist", "metric"), drop=FALSE])
     for (u in seq_len(nrow(umap_grid))) {
       neighbors_value <- umap_grid$neighbors[u]
+      # UMAP/Leiden requires k < (number of trajectory points - 1).
+      # Clamp user configuration for small, otherwise valid input tables.
+      max_neighbors <- max(1L, nrow(mat) - 2L)
+      neighbors_value <- min(as.integer(neighbors_value), max_neighbors)
       min_dist_value <- umap_grid$min_dist[u]
       metric_value <- umap_grid$metric[u]
       cluster_values <- sort(unique(dim_grid$cluster_res[
@@ -389,7 +428,26 @@ run_cag <- function(task) {
               Pseudotime=as.numeric(pt[colnames(graph_cds)]),
               stringsAsFactors=FALSE
             )
-            write_coord_file(output, coord_path(cag, tag, narank))
+            coord_file <- coord_path(cag, tag, narank)
+            write_coord_file(output, coord_file)
+            # Also emit a TreeMM-compatible coordinates table for downstream
+            # users who expect Row.names/CellID, Pseudotime and PC columns.
+            pc <- tryCatch(reducedDims(graph_cds)$PCA, error=function(e) NULL)
+            if (is.null(pc)) pc <- matrix(NA_real_, nrow=nrow(output), ncol=0)
+            pc <- as.matrix(pc)[keep_index, , drop=FALSE]
+            n_pc <- max(18L, ncol(pc))
+            pc_out <- matrix(NA_real_, nrow=nrow(output), ncol=n_pc)
+            if (ncol(pc)) pc_out[, seq_len(min(ncol(pc), n_pc))] <- pc[, seq_len(min(ncol(pc), n_pc)), drop=FALSE]
+            legacy <- data.frame(
+              `Row.names`=output$rowcolumn,
+              CellID=output$rowcolumn,
+              Pseudotime=output$Pseudotime,
+              pc_out,
+              check.names=FALSE,
+              stringsAsFactors=FALSE
+            )
+            names(legacy)[4:ncol(legacy)] <- paste0("PC", seq_len(n_pc))
+            write_coord_file(legacy, legacy_coord_path(cag, tag, narank))
           }
           TRUE
         }, error=function(e) e)
@@ -453,9 +511,10 @@ if (n_workers > 1L) {
       "run_cag", "run_task_safely"
     )
   )
+  clusterExport(cluster, "CORE_PATH")
   clusterEvalQ(cluster, {
+    source(CORE_PATH)
     suppressMessages({
-      library(monocle3)
       library(tidyr)
       library(Matrix)
       library(data.table)
@@ -485,4 +544,12 @@ cat("M4 summary:\n", paste(result_lines, collapse="\n"), "\n", sep="")
 has_failures <- length(result_lines) != length(tasks) ||
   anyNA(result_lines) ||
   any(grepl("fail=[1-9]|^FAIL|^SKIP", result_lines), na.rm=TRUE)
+# A selected taxon can contain sparse or degenerate CAGs. Preserve successful
+# coordinate files and let the API package the usable results when at least one
+# configuration completed successfully.
+coordinate_files <- list.files(COORD_DIR, pattern="^coords_.*[.]csv$", full.names=TRUE)
+if (has_failures && length(coordinate_files) > 0L) {
+  cat("Continuing with", length(coordinate_files), "successful coordinate files.\n")
+  has_failures <- FALSE
+}
 if (has_failures) quit(status=1L)

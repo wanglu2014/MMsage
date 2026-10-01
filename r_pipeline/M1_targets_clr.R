@@ -1,81 +1,77 @@
 #!/usr/bin/env Rscript
-# MMSage M1: 目标菌CAG解析 + CLR变换
+# MMSage M1: 输入微生物/代谢物全量解析 + CLR变换
 # 所有输入/输出均在 heart/metacard 下
 
-suppressMessages(library(SpiecEasi))
-
-MC <- "E:/Onedrive/mon345/02_TRAjMM/heart/metacard"
-OUT <- file.path(MC, "mmsage_out")
+MC <- Sys.getenv("MMSAGE_JOB_DIR")
+if (!nzchar(MC)) stop("MMSAGE_JOB_DIR must identify the job input directory")
+OUT <- Sys.getenv("MMSAGE_OUTPUT_DIR", unset=file.path(MC, "mmsage_out"))
 dir.create(OUT, showWarnings=FALSE, recursive=TRUE)
 
-cat("========== MMSage M1: 目标菌 + CLR ==========\n")
+cat("========== MMSage M1: 输入特征 + CLR ==========\n")
 
-# 1. 读taxonomy映射(CAG→species)
-taxon <- read.table(file.path(MC,"data/taxon_names.tsv"), header=TRUE, sep="\t",
-                    stringsAsFactors=FALSE, comment.char="", quote="", fill=TRUE,
-                    col.names=c("CAG","species"))
-
-# 2. 目标菌
-targets <- list(
-  list(microbe="Dorea",                        metabolite="vanillactate",     direction=-1),
-  list(microbe="Faecalibacterium prausnitzii", metabolite="PAGln",            direction=-1),
-  list(microbe="Faecalibacterium prausnitzii", metabolite="4-cresyl sulfate", direction=-1),
-  list(microbe="Roseburia faecis",             metabolite="PAGln",            direction=-1),
-  list(microbe="Roseburia faecis",             metabolite="4-cresyl sulfate", direction=-1)
-)
-
-# 3. 读abundance
+# 1. 读abundance
 mic <- read.table(file.path(MC,"data/microbes_wide.tsv"), header=TRUE, sep="\t",
-                 check.names=FALSE, row.names=1)
+                 check.names=FALSE, row.names=1, quote='"', comment.char="")
 met <- read.table(file.path(MC,"data/metabolites_wide.tsv"), header=TRUE, sep="\t",
-                 check.names=FALSE, row.names=1)
-cat("微生物:", nrow(mic),"x",ncol(mic)," 代谢物:",nrow(met),"x",ncol(met),"\n")
+                 check.names=FALSE, row.names=1, quote='"', comment.char="")
+met_threshold <- suppressWarnings(as.numeric(Sys.getenv("MMSAGE_MIN_METABOLITE_MEAN", unset="0.0026")))
+if (!is.finite(met_threshold) || met_threshold < 0) met_threshold <- 0
+met_norm <- sweep(as.matrix(met), 2, pmax(colSums(as.matrix(met), na.rm=TRUE), 1e-12), "/")
+keep_met <- rowMeans(met_norm, na.rm=TRUE) >= met_threshold
+if (!any(keep_met)) stop("No metabolites remain after the configured abundance threshold")
+cat("微生物:", nrow(mic),"x",ncol(mic)," 代谢物:",sum(keep_met),"/",nrow(met),"\n")
 
-# 4. 解析目标CAG(只保留在矩阵中的)
-target_cags <- list()
-for (t in unique(sapply(targets, function(x) x$microbe))) {
-  idx <- grep(t, taxon$species, ignore.case=TRUE)
-  cags <- intersect(taxon$CAG[idx], rownames(mic))
-  target_cags[[t]] <- cags
-  cat("  ", t, ":", length(cags), "CAG:", paste(cags, collapse=","), "\n")
+# 2. 全量使用输入特征；不按预设菌种或代谢物名称筛选。
+all_target_cags <- rownames(mic)
+requested_microbe <- trimws(Sys.getenv("MMSAGE_MICROBE_FILTER", unset=""))
+if (nzchar(requested_microbe)) {
+  exact <- all_target_cags[tolower(all_target_cags) == tolower(requested_microbe)]
+  fuzzy <- all_target_cags[grepl(requested_microbe, all_target_cags, fixed=TRUE, ignore.case=TRUE)]
+  target_cags <- unique(c(exact, fuzzy))
+  if (!length(target_cags)) stop("Requested microbe or taxon is absent from the input: ", requested_microbe)
+} else {
+  target_cags <- all_target_cags
 }
-all_target_cags <- unique(unlist(target_cags))
-cat("目标CAG总数:", length(all_target_cags), "\n")
+targets <- lapply(target_cags, function(x) list(microbe=x, metabolite=rownames(met), direction=NA_integer_))
+target_mets <- list(input_metabolites=rownames(met))
+taxon <- data.frame(CAG=all_target_cags, species=all_target_cags, stringsAsFactors=FALSE)
+cat("输入微生物数:", length(target_cags), "| 输入代谢物数:", nrow(met), "\n")
 
-# 5. 目标代谢物列匹配
-met_syn <- list(
-  vanillactate = c("vanillactate"),
-  PAGln = c("phenylacetylglutamine"),
-  "4-cresyl sulfate" = c("p-cresol sulfate","4-cresyl sulfate")
-)
-target_mets <- list()
-for (nm in names(met_syn)) {
-  hit <- unique(unlist(lapply(met_syn[[nm]], function(s)
-    grep(s, rownames(met), ignore.case=TRUE, value=TRUE))))
-  target_mets[[nm]] <- hit
-  cat("  代谢物", nm, "->", paste(hit, collapse=" | "), "\n")
+# TreeMM RCLR: normalize within each sample, retain zeroes as missing values,
+# take logs, and center by the mean finite log abundance for that sample.
+rclr <- function(feature_by_sample) {
+  x <- t(as.matrix(feature_by_sample))
+  x[is.na(x)] <- 0
+  totals <- rowSums(x, na.rm=TRUE)
+  x <- x / pmax(totals, 1e-12)
+  z <- log(x)
+  z[is.infinite(z) | is.na(z)] <- NA_real_
+  center <- rowMeans(z, na.rm=TRUE)
+  centered <- sweep(z, 1, center, "-")
+  centered[is.infinite(centered) | is.na(centered)] <- NA_real_
+  t(centered)
 }
 
-# 6. CLR transformation within each sample; output remains features x samples.
-mic_z <- as.matrix(mic)
-mic_z[mic_z == 0] <- min(mic_z[mic_z != 0])
-clr_mic <- clr(mic_z)
+clr_mic <- rclr(mic)
+# TreeMM's generate_tensor filters after full-table compositional
+# normalization. Keep the full-table denominators when selecting columns.
+met_raw <- as.matrix(met)
+met_norm_full <- t(sweep(met_raw, 2, pmax(colSums(met_raw, na.rm=TRUE), 1e-12), "/"))
+met_norm_full <- met_norm_full[, keep_met, drop=FALSE]
+z_met <- log(met_norm_full)
+z_met[is.infinite(z_met) | is.na(z_met)] <- NA_real_
+z_met <- sweep(z_met, 1, rowMeans(z_met, na.rm=TRUE), "-")
+z_met[is.infinite(z_met) | is.na(z_met)] <- NA_real_
+clr_met <- t(z_met)
+met <- met[keep_met, , drop=FALSE]
 
-met_z <- as.matrix(met)
-# CLR requires positive values, while the integrated metabolite matrix contains negatives.
-if (min(met_z, na.rm=TRUE) <= 0) met_z <- met_z - min(met_z, na.rm=TRUE) + 1e-6
-met_z[met_z == 0] <- min(met_z[met_z != 0])
-clr_met <- clr(met_z)
-
-stopifnot(identical(dim(clr_mic), dim(mic_z)),
-          identical(dim(clr_met), dim(met_z)),
-          max(abs(colMeans(clr_mic))) < 1e-10,
-          max(abs(colMeans(clr_met))) < 1e-10)
+stopifnot(identical(dim(clr_mic), dim(as.matrix(mic))),
+          identical(dim(clr_met), dim(as.matrix(met))))
 cat("CLR complete clr_mic:", dim(clr_mic), "clr_met:", dim(clr_met), "\n")
 
 # 7. 保存
-saveRDS(list(targets=targets, target_cags=target_cags, all_target_cags=all_target_cags,
-             target_mets=target_mets, clr_mic=clr_mic, clr_met=clr_met, taxon=taxon),
+saveRDS(list(targets=targets, target_cags=target_cags, all_target_cags=target_cags,
+             target_mets=list(input_metabolites=rownames(met)), clr_mic=clr_mic, clr_met=clr_met, taxon=taxon),
         file.path(OUT,"M1_cache.rds"))
 cat("已保存: mmsage_out/M1_cache.rds\n")
 cat("========== M1 完成 ==========\n")
