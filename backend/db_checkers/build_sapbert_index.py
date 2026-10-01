@@ -3,13 +3,13 @@
 """
 SapBERT Embedding Index Builder
 ================================
-Extract unique entity names from five data sources, encode them with SapBERT,
-and save the embeddings and index mapping for retrieval.
+从 5 个数据源（Disbiome, CTD, ChEBI, BacDive, binded_database）中提取所有
+唯一实体名，用 SapBERT 编码后存为 .npy + mapping JSON，供 RAG 检索使用。
 
-Usage:
-    python build_sapbert_index.py
+用法:
+    C:/Users/WLPC/.conda/envs/mindmap_env/python.exe build_sapbert_index.py
 
-Output:
+输出:
     sapbert_index/
         entity_embeddings.npy     (N x 768 float32)
         entity_mapping.json       (index -> {name, source, type})
@@ -22,7 +22,7 @@ import numpy as np
 from pathlib import Path
 from typing import Dict, Set, Tuple
 
-# Data source paths
+# ── 数据源路径 ──────────────────────────────────────────────────
 _DATA_DIR = Path(__file__).parent.parent.parent / "data" / "databases"
 
 SOURCES = {
@@ -37,12 +37,12 @@ OUTPUT_DIR = Path(__file__).parent / "sapbert_index"
 
 
 def extract_entities() -> Dict[str, Set[str]]:
-    """Extract unique entity names grouped by entity type."""
+    """从各数据源提取唯一实体名，按类型分组。"""
     microbes = set()
     metabolites = set()
     diseases = set()
 
-    # Disbiome: microbes and diseases
+    # ── Disbiome: 微生物 + 疾病 ──
     p = SOURCES["disbiome"]
     if p.exists():
         with open(p, "r", encoding="utf-8") as f:
@@ -57,7 +57,7 @@ def extract_entities() -> Dict[str, Set[str]]:
                         diseases.add(v)
         print(f"[Disbiome] microbes={len(microbes)}, diseases={len(diseases)}")
 
-    # CTD: chemicals and diseases
+    # ── CTD: 化学物质 + 疾病 ──
     p = SOURCES["ctd"]
     if p.exists():
         with open(p, "r", encoding="utf-8") as f:
@@ -70,7 +70,7 @@ def extract_entities() -> Dict[str, Set[str]]:
                     diseases.add(v)
         print(f"[CTD] metabolites={len(metabolites)}, diseases={len(diseases)}")
 
-    # ChEBI: metabolites
+    # ── ChEBI: 代谢物 ──
     p = SOURCES["chebi"]
     if p.exists():
         with open(p, "r", encoding="utf-8") as f:
@@ -81,7 +81,7 @@ def extract_entities() -> Dict[str, Set[str]]:
                         metabolites.add(v)
         print(f"[ChEBI] metabolites={len(metabolites)}")
 
-    # BacDive: microbes
+    # ── BacDive: 微生物 ──
     p = SOURCES["bacdive"]
     if p.exists():
         with open(p, "r", encoding="utf-8") as f:
@@ -92,7 +92,7 @@ def extract_entities() -> Dict[str, Set[str]]:
                         microbes.add(v)
         print(f"[BacDive] microbes={len(microbes)}")
 
-    # Binded database: microbes and metabolites
+    # ── binded_database: 微生物 + 代谢物 ──
     p = SOURCES["binded"]
     if p.exists():
         with open(p, "r", encoding="utf-8") as f:
@@ -115,14 +115,14 @@ def extract_entities() -> Dict[str, Set[str]]:
 
 
 def build_index(entities: Dict[str, Set[str]], batch_size: int = 256):
-    """Encode entities with SapBERT and save the embeddings and mapping."""
+    """用 SapBERT 编码所有实体，存为 .npy + mapping JSON。"""
     from sentence_transformers import SentenceTransformer
 
     print("\nLoading SapBERT model...")
     model = SentenceTransformer("cambridgeltl/SapBERT-from-PubMedBERT-fulltext")
     print(f"Model loaded. Embedding dim: {model.get_sentence_embedding_dimension()}")
 
-    # Build the (name, type) list.
+    # 构建 (name, type) 列表
     all_entities = []
     for etype, names in entities.items():
         for name in sorted(names):
@@ -133,9 +133,9 @@ def build_index(entities: Dict[str, Set[str]], batch_size: int = 256):
 
     names = [e[0] for e in all_entities]
     embeddings = model.encode(names, batch_size=batch_size, show_progress_bar=True,
-                              normalize_embeddings=True)  # L2-normalized for cosine similarity
+                              normalize_embeddings=True)  # L2 归一化，cosine sim = dot product
 
-    # Save the index.
+    # 保存
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
     np.save(str(OUTPUT_DIR / "entity_embeddings.npy"), embeddings.astype(np.float32))
